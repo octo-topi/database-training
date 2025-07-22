@@ -13,6 +13,7 @@ Several paradigm:
 - relational: PostgreSQL
 - graph: 
 - document: ElasticSearch
+- hybrid
 
 ### environment
 
@@ -33,8 +34,28 @@ SQL:
 - DDL: CREATE TABLE, ALTER TABLE
 
 Data model:
-- logical model
-- physical model
+- logical model : primary key, foreign keys, contraints (unique not null, function)
+- physical model : partition
+
+Business data type:
+- facts
+- dimension
+- configuration
+
+Should you 
+- expose primary keys to other applications ?
+- use technical id, application-generated (uuid) or functional (composite) ?
+
+### import data
+
+CSV using COPY FROM
+
+### libraries
+
+Basics of:
+- client with/without connexion pool
+- query-builder
+- ORM
 
 ### development best practice
 
@@ -54,6 +75,20 @@ Linting:
 
 ## Medium : technical leaders and senior developers
 
+### Scope
+
+Duration: 3 days 
+Creation: 9 days
+
+### Pre-requisite
+
+[Basic](#basic--developers) 
+
+How to make sure everybody knows the basics:
+ - ask questions informally
+ - submit MCQ
+ - browse a codebase and ask for bugs
+
 ### Foundations
 
 #### MVCC
@@ -63,18 +98,19 @@ Store multiple versions :
 - bloating
 
 Practice:
-- create a dataset an update rows
-- display dead rows: pg_dirty
+- create a dataset and update rows
+- display dead rows: pg_dirty + views
 - recover space using VACUUM
 - setting up AUTOVACUUM
 
 Concurrency:
 - isolation level
-- locks 
+- transaction
+- locks ( include advisory lock on virtual resource ?) 
 
 Practice:
 - create transactions
-- get locks
+- get locks (lock-tree)
 - create a deadlock
 
 #### Cache
@@ -92,7 +128,7 @@ Server metrics:
 - RAM & swapping
 - I/O : bandwidth, latency 
 
-Database metrics:
+Database metrics and statistics :
 - traffic
 - table size and row count
 - cache size, cache hit
@@ -101,9 +137,10 @@ Database metrics:
 Identify running queries
 - SQL text
 - locks
+- wait events
 
 Get completed queries
-- single-query logging
+- single-query logging (log in fs)
 - aggregated logging: `pg_stats_stements`
 
 ### Debugging
@@ -119,8 +156,13 @@ Read an execution plan:
 
 Key concepts:
 - selectivity (strong - weak) and cardinality
-- index and partitions
-- materialized views
+- index 
+- partitions
+
+Practice:
+- create index
+- get use case when not used
+- get use case when used
 
 #### Gathering statistics
 
@@ -128,13 +170,25 @@ How are statistics sampled ?
 - number
 - text
 
-Query histograms
+Query histograms views
 
 When are statistics gathered ?
 
+#### Import data
+
 Practice : massive table loads
-- practice: load dump
+- load data
+  - using streams : `COPY TO stdout | COPY FROM stdin`
+  - using flat-file : `COPY TO` + `COPY FROM`
+  - using plain SQL : `pg_dump` and `psql`
+  - using custom format (archive) : `pg_dump` and `pg_restore`
 - use `FREEZE` option
+- disable constraints and indexes
+- use `ANALYZE`
+
+#### Remote data source
+Foreign Data Wrapper
+
 
 #### Indexing
 
@@ -142,12 +196,19 @@ Type:
 - b-tree
 - bitmap
 
+Type:
+- single colum
+- composite
+- function-based
+
+Covering index
+
 Drawbacks:
 - redundancy (maintenance overhead)
 - versioning side-effect (index rebuild)
 
 Practice:
-- design and create
+- design and create (simple, composite)
 - check usage
 
 #### Partioning
@@ -162,17 +223,28 @@ Sub-partitioning
 
 ### Advanced data types
 
+#### Text
 Store and query text:
 - fulltext search
-- pg_trgm, fuzzystrmatch, LEVENSHTEIN
+- `pg_trgm`, fuzzystrmatch, Levenshtein
 
+#### JSON
 Store and query JSON
 
+#### Binary 
 Store and query binary: BLOB, BYTEA
+
+#### Vector
+`pg_vector`
+
 
 ### Application integration
 
 #### Pool
+
+max_connection
+
+PaSzs and autoscaling
 
 #### Native VS Query builder VS ORM
 
@@ -184,14 +256,29 @@ How to abstract it in your domain ?
 
 Integration tests: quick feedback VS protection against regression
 
-Should you use an in-memory database ?
+Should you use an in-memory database : 
+- when usage is in the soft spot;
+- when to go out.
 
-#### hexagonal/clean architecture drawbacks
+
+#### Application design (interaction with database) 
+
+##### Hexagonal / clean architecture
+
+When to do, when not to do
+
+##### DDD
+
+An aggregate :
+- in a single table;
+- in a dedicated schema.
+
+Can you keep referential integrity between bounded context ?
 
 #### deployment
 
-Preventing deadlocks
-
+ZDD (blue/green)
+Preventing deadlocks 
 Should you revert ? How to do it ?
 
 #### APM and query correlation
@@ -202,7 +289,13 @@ On-the-shelf: openTelemetry (Js), Jaeger (Java)
 
 ## Advanced : auditors and performance advisor
 
-Data layout
+### Pre-requisite
+
+### Scope
+
+### Data layout
+
+Concepts
 - heap segment
 - free space map
 - visibility map
@@ -211,29 +304,51 @@ ID wraparound and freeze operation
 
 TOAST
 
+### sizing 
+
+#### hardware
+
 cpu_cost, io_cost, index_cost
+
+#### instance
+
+shared_mem
+
+#### client process memory
+
+work_mem, temp files, OOM
+
+### Extensions
 
 Trigger
 
+materialized views
+
 stored procedure
 
-PaaS or DBaaS
+### PaaS or DBaaS
 
-Wait events
+### More on wait events
 
-Sizing client process memory: work_mem, temp files, OOM
+### Performance tests
 
-Performance tests
+### Parallelization
 
-Parallelization
+### Monitoring and optimizing 
 
-Monitoring and optimizing data-related activity:
+pg_bench, pb_backrest 
+
+Data-related activity:
 - pg_writer
 - pg_wal_writer : fullpage write, fs full
 
-Capture Data Change
+### Capture Data Change
 
-Replication
+### Replication
+
+Incremental backup/restore
+
+Patroni
 
 ## Appendix : resources
 
@@ -251,9 +366,11 @@ Replication
 
 [PostgreSQL roadmap](https://roadmap.sh/postgresql-dba)
 
+[Use the index, Luke !](https://use-the-index-luke.com/sql/preface)
+
+[7 things a developer should know](https://blog.octo.com/7-things-a-developer-should-know-about-databases)
+
 ### printed only
 
 [PostgreSQL - Architecture et notions avancées](https://www.amazon.fr/PostgreSQL-Architecture-avanc%C3%A9es-Guillaume-Lelarge-ebook/dp/B083R1H7YH)
-
- 
 
