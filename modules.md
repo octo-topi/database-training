@@ -6,7 +6,20 @@ Guidelines:
 
 ## Basic : developers
 
+### scope
+
+Duration: 3 days
+Creation: 6 days
+
+### Pre-requisite
+
+Know the relational model
+- what is a table, a primary key, a foreign key 
+- write and execute basic SQL queries, at least a SELECT with JOIN and a WHERE clause
+
 ### foundation
+
+Choose the database you need.
 
 Several paradigm:
 - key/value: redis
@@ -15,22 +28,29 @@ Several paradigm:
 - document: ElasticSearch
 - hybrid
 
-### environment
+### local environment
 
-Use Docker to start an instance :
-- use healthcheck
-- configure using `postgresql.conf`
-- limit resource usage
+Being able to start a database server  locally and run queries against it using a client.
+
+Use Docker and compose to start a Postgresql server :
+- configure exposed port, credentials and database name ;
+- use healthcheck to make sure it's properly started ;
+- know you data won't be persisted between container restart ;
+- know the memory usage is limited to a small extent by default by Postgresql itself ;
+- know the CPU and I/O usage is not limited by default ;
+- know you can change resource usage using [pgtune](https://pgtune.leopard.in.ua/) and `postgresql.conf`.
 
 Using a CLI :
-- `psql` client, interactive and file mode
+- `psql` client
+   - interactive mode, to get schema description and run SQL queries
+   - file mode, to run scripts
 - [pgcli](https://www.pgcli.com/)
 
 ### using your database
 
 SQL:
 - Queries: SELECT, CTE, views
-- DML: INSERT, UPDATE, DELETE
+- DML: INSERT, UPDATE, DELETE, TRUNCATE
 - DDL: CREATE TABLE, ALTER TABLE
 
 Data model:
@@ -48,12 +68,13 @@ Should you
 
 ### import data
 
-CSV using COPY FROM
+CSV using `COPY FROM`
 
 ### libraries
 
 Basics of:
 - client with/without connexion pool
+- transactions
 - query-builder
 - ORM
 
@@ -68,16 +89,50 @@ No-downtime deployment (ZDD):
 - key concepts
 - practice: rename a column in three deployments
 
-Linting:
+Linting (optional):
 - naming standards
 - constraints: primary key and foreign keys
-
 
 ## Medium : technical leaders and senior developers
 
 ### Scope
 
-Duration: 3 days 
+Duration: 6 days
+
+Day 1 : performance
+- heap : large random-access files
+- cache : speed up queries
+  - choose its size, modify it
+  - find its content, clear it
+- MVCC and its impact on performance
+  - visibility map (a glance)
+- access data in heap
+- statistics and distribution
+- reading an execution plan (chosen path) and check if appropriate
+- data modification : its cost
+- partitions : another access path
+
+
+- why using indexes ? index theory
+- access paths (index or heap) and filtering
+
+- choose a path: costs (based on access type + estimated rows)
+- reading an execution plan (chosen path) and check if appropriate
+- practice: creating indexes and using them on `SELECT`
+  - different data distribution
+  - modifying data and updating statistics
+  - use only execution plan to estimate execution time
+
+Day 2 : performance 
+- benchmarking using `pg_stat_statements`
+- scaling : counter-intuitive phenomenons
+  - latency of indirections in production
+  - more capacity, not faster
+- data modification : index update cost (1 index)
+
+Day 3 : performance
+- an overall view: end-to-end tests
+
 Creation: 9 days
 
 ### Pre-requisite
@@ -262,6 +317,12 @@ Should you use an in-memory database :
 
 
 #### Application design (interaction with database) 
+
+##### Primary key
+
+UUID 
+
+[v4 is bad for performance](https://www.cybertec-postgresql.com/en/unexpected-downsides-of-uuid-keys-in-postgresql/)
 
 ##### Hexagonal / clean architecture
 

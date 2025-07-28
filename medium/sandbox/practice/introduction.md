@@ -1,8 +1,9 @@
-# Medium
+# Introduction
 
-## Introduction
+Le niveau débutant du SQL permet 
 
-### Correctness over performance
+
+## Correctness over performance
 
 > The separation of concerns—what is needed versus how to get it—works remarkably well in SQL, but it is still not perfect. The abstraction reaches its limits when it comes to performance: the author of an SQL statement by definition does not care how the database executes the statement. Consequently, the author is not responsible for slow execution. However, experience proves the opposite; i.e., the author must know a little bit about the database to prevent performance problems.
 
@@ -10,9 +11,9 @@
 
 > This book covers everything developers need to know about indexes—and nothing more. To be more precise, the book covers the most important index type only: the B-tree index.
 
-### Performance
+## Performance
 
-#### There is no such thing as a slow query
+### There is no such thing as a slow query
 
 > Alice: Would you tell me, please, which way I ought to go from here?
 > The Cheshire Cat: That depends a good deal on where you want to get to.
@@ -22,9 +23,11 @@
 > The Cheshire Cat: Oh, you're sure to do that, if only you walk long enough.
 
 
-#### SLA, by design
+### SLA, by design
 
-## Performance
+## Database constraints
+
+Why don't we use CSV files on S3 buckets ?
 
 You can't use a database without index, why ?
 Because access would be slow, why ?
@@ -32,12 +35,14 @@ Because data should be read on fs, which is 10⁵ slower that memory, why ?
 Because it can't fit in memory, why ?
 Because huge amount of data today
 
-Telephone book metaphor:
+### Telephone book metaphor
+
+Great
 - can't use phone most of the time without index
 - index takes place in the book
 - data cannot be updated without updating index (or it would be useless)
 
 Metaphor limit
-- data is stored in heap which is unsorted, whereas phone number are sorted (by location, then first name)
+- data is stored in heap which is unpartioned and unsorted, whereas phone number are partitioned (by location) and sorted (by first name)
 - can't load phone book index in memory (no memory whatsoever), in cache
 - you've got bookmarks in books, not in database
