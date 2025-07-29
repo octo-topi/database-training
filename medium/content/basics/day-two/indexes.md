@@ -1,6 +1,20 @@
 # Indexes
 
-## overview
+## What is essentially an index ?
+
+The telephone book metaphor
+
+Great
+- can't use phone most of the time without index
+  - index use space in the book (you should pay to create them and² print them)
+- data cannot be updated without updating index (or it would be useless)
+
+Metaphor limit
+- data is stored in heap which is unpartioned and unsorted, whereas phone number are partitioned (by location) and sorted (by first name)
+- can't load phone book index in memory (no memory whatsoever), in cache
+- you've got bookmarks in books, not in database
+
+## Balanced-tree in CS
 
 Node type:
 - root
@@ -39,9 +53,16 @@ It is essentially a delete + insert
 
 A heap-only access benefits from multi-blocks read (full table scan)
 
-## index updates
 
-### operations
+## Indexes in PostgreSQL
+
+MVCC implementation 
+
+## What happens on heap write operations ? 
+
+### index maintenance operations
+
+Write down the cost of each operation if each index block in not cached.  
 
 #### adding an entry in the leaf node
 
@@ -71,7 +92,11 @@ optimization: find for consecutive identical entries and make them a list
 occurs if all ascending nodes are full
 cascading page split, a new root node can be created
 
-### when data is created (on index key)
+### on heap, when data is 
+
+##### created 
+
+###### on index key
 
 fillfactor is 90 % by default on b-tree
 
@@ -79,14 +104,18 @@ block allocation is 8 kbytes (many nodes)
 - as long as you don't reach the fillfactor, you create an entry leaf node 
 - if you reach the fillfactor, you do a page split
 
-### when data is updated (on index key)
+###### not on index key
+
+#### updated
+
+##### on index key
 
 if the first indexed column is updated, you may need to add a leaf entry in another block (see data created below)
 
 if the second indexed column is updated, you may need to add a leaf in the same block
 as fillfactor is 90 % by default on b-tree, you can add an entry in the leaf node 
 
-### when data is updated (not on index key)
+##### not on index key
 
 MVCC cause a new entry to be created, even in indexed value has not changed
 (any change to rows trigger a new entry creation)
@@ -95,3 +124,5 @@ optimisation: HOT update in order not to modify the index
 conditions:
 - not updating an indexed key
 - setting the heap fillfactor to less than 100 % so update can be done in the same block
+
+#### deleted

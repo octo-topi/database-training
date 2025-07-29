@@ -32,11 +32,11 @@ Several paradigm:
 
 Being able to start a database server  locally and run queries against it using a client.
 
-Use Docker and compose to start a Postgresql server :
+Use Docker and compose to start a PostgreSQL server :
 - configure exposed port, credentials and database name ;
 - use healthcheck to make sure it's properly started ;
 - know you data won't be persisted between container restart ;
-- know the memory usage is limited to a small extent by default by Postgresql itself ;
+- know the memory usage is limited to a small extent by default by PostgreSQL itself ;
 - know the CPU and I/O usage is not limited by default ;
 - know you can change resource usage using [pgtune](https://pgtune.leopard.in.ua/) and `postgresql.conf`.
 
@@ -54,7 +54,7 @@ SQL:
 - DDL: CREATE TABLE, ALTER TABLE
 
 Data model:
-- logical model : primary key, foreign keys, contraints (unique not null, function)
+- logical model : primary key, foreign keys, constraints (unique not null, function)
 - physical model : partition
 
 Business data type:
@@ -95,11 +95,22 @@ Linting (optional):
 
 ## Medium : technical leaders and senior developers
 
-### Scope
+### Scope and cost
+
+Creation: 9 days, spent 4.5
 
 Duration: 6 days
 
-Day 1 : performance
+Parts
+- [one : basics - 3 days ](medium/content/basics):
+  - heap : pro/cons, storage layout (blocks)
+  - monitor a query : execution plan, statistics
+  - index : pro/cons, storage layout, optimization
+  - tuning : 
+- [two : performance tests - 2 days](medium/content/performance-tests) 
+- [three : application integration - 1 day](medium/content/application-integration)
+
+Day 1 : heap, execution plan, cache, MVCC
 - heap : large random-access files
 - cache : speed up queries
   - choose its size, modify it
@@ -112,7 +123,7 @@ Day 1 : performance
 - data modification : its cost
 - partitions : another access path
 
-
+Day 2 : indexes
 - why using indexes ? index theory
 - access paths (index or heap) and filtering
 
@@ -123,17 +134,13 @@ Day 1 : performance
   - modifying data and updating statistics
   - use only execution plan to estimate execution time
 
-Day 2 : performance 
+Day 3 : performance 
 - benchmarking using `pg_stat_statements`
 - scaling : counter-intuitive phenomenons
   - latency of indirections in production
   - more capacity, not faster
 - data modification : index update cost (1 index)
 
-Day 3 : performance
-- an overall view: end-to-end tests
-
-Creation: 9 days
 
 ### Pre-requisite
 
@@ -144,9 +151,11 @@ How to make sure everybody knows the basics:
  - submit MCQ
  - browse a codebase and ask for bugs
 
-### Foundations
+### Content
 
-#### MVCC
+#### Foundations
+
+##### MVCC
 
 Store multiple versions :
 - dead rows
@@ -168,7 +177,7 @@ Practice:
 - get locks (lock-tree)
 - create a deadlock
 
-#### Cache
+##### Cache
 
 Practice:
 - querying the cache
@@ -176,7 +185,7 @@ Practice:
 - track ring buffer usage
 
 
-### Observability
+#### Observability
 
 Server metrics:
 - CPU
@@ -198,7 +207,7 @@ Get completed queries
 - single-query logging (log in fs)
 - aggregated logging: `pg_stats_stements`
 
-### Debugging
+#### Debugging
 
 Get execution plan
 
@@ -207,7 +216,7 @@ Read an execution plan:
 - medium : actual (IO timings)
 - [use web interface](https://explain.dalibo.com) 
 
-### Access path
+#### Access path
 
 Key concepts:
 - selectivity (strong - weak) and cardinality
@@ -219,7 +228,7 @@ Practice:
 - get use case when not used
 - get use case when used
 
-#### Gathering statistics
+##### Gathering statistics
 
 How are statistics sampled ? 
 - number
@@ -229,7 +238,7 @@ Query histograms views
 
 When are statistics gathered ?
 
-#### Import data
+##### Import data
 
 Practice : massive table loads
 - load data
@@ -241,18 +250,18 @@ Practice : massive table loads
 - disable constraints and indexes
 - use `ANALYZE`
 
-#### Remote data source
+##### Remote data source
 Foreign Data Wrapper
 
 
-#### Indexing
+##### Indexing
 
 Type:
 - b-tree
 - bitmap
 
 Type:
-- single colum
+- single column
 - composite
 - function-based
 
@@ -266,48 +275,48 @@ Practice:
 - design and create (simple, composite)
 - check usage
 
-#### Partioning
+##### Partioning
 
 Select partition key
 
 Create a partition
 
-Check access time VS fullscan
+Check access time VS full-scan
 
 Sub-partitioning
 
-### Advanced data types
+#### Advanced data types
 
-#### Text
+##### Text
 Store and query text:
 - fulltext search
-- `pg_trgm`, fuzzystrmatch, Levenshtein
+- `pg_trgm`, `fuzzystrmatch`, Levenshtein
 
-#### JSON
+##### JSON
 Store and query JSON
 
-#### Binary 
+##### Binary 
 Store and query binary: BLOB, BYTEA
 
-#### Vector
+##### Vector
 `pg_vector`
 
 
-### Application integration
+#### Application integration
 
-#### Pool
+##### Pool
 
 max_connection
 
-PaSzs and autoscaling
+PaaS and autoscaling
 
-#### Native VS Query builder VS ORM
+##### Native VS Query builder VS ORM
 
-#### Transaction
+##### Transaction
 
 How to abstract it in your domain ?
 
-#### Automated tests
+##### Automated tests
 
 Integration tests: quick feedback VS protection against regression
 
@@ -316,19 +325,19 @@ Should you use an in-memory database :
 - when to go out.
 
 
-#### Application design (interaction with database) 
+##### Application design (interaction with database) 
 
-##### Primary key
+###### Primary key
 
 UUID 
 
 [v4 is bad for performance](https://www.cybertec-postgresql.com/en/unexpected-downsides-of-uuid-keys-in-postgresql/)
 
-##### Hexagonal / clean architecture
+###### Hexagonal / clean architecture
 
 When to do, when not to do
 
-##### DDD
+###### DDD
 
 An aggregate :
 - in a single table;
@@ -336,13 +345,13 @@ An aggregate :
 
 Can you keep referential integrity between bounded context ?
 
-#### deployment
+##### deployment
 
 ZDD (blue/green)
 Preventing deadlocks 
 Should you revert ? How to do it ?
 
-#### APM and query correlation
+##### APM and query correlation
 
 DIY: monkey-patching 
 
@@ -401,7 +410,7 @@ pg_bench, pb_backrest
 
 Data-related activity:
 - pg_writer
-- pg_wal_writer : fullpage write, fs full
+- pg_wal_writer : full page write, fs full
 
 ### Capture Data Change
 

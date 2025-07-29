@@ -21,6 +21,7 @@ SELECT
     c.buffers_pinned pinned_count,
     TRUNC(c.usagecount_avg) || ' %' used
 FROM pg_buffercache_summary() c;
+
 SELECT pg_buffercache_evict() 
 ```
 
