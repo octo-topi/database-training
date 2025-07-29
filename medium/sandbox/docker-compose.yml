@@ -10,6 +10,7 @@
 # Load configuration from .env file
 # Limit resources (CPU/RAM)
 services:
+
   postgresql:
     image: postgres:${POSTGRESQL_IMAGE_VERSION}
     container_name: postgresql
@@ -23,6 +24,7 @@ services:
     #    command: postgres $SOME_CONFIGURATION
     volumes:
       - ./configuration/postgresql.conf:/etc/postgresql.conf
+      - postgresql_data:/var/lib/postgresql/data
     healthcheck:
       test: "psql --dbname \"host=localhost port=${POSTGRESQL_INTERNAL_PORT} dbname=${POSTGRESQL_DATABASE_NAME} user=${POSTGRESQL_USER_NAME} password=${POSTGRESQL_USER_PASSWORD}\""
       interval: 1s
@@ -33,3 +35,6 @@ services:
         limits:
           cpus: '${POSTGRESQL_CPU_COUNT}'
           memory: ${POSTGRESQL_TOTAL_MEMORY_SIZE}
+
+volumes:
+  postgresql_data:

@@ -1,5 +1,8 @@
-start-instance:
+start-instance-no-volume:
     docker compose up --detach --wait --renew-anon-volumes --renew-anon-volumes postgresql
+
+start-instance:
+    docker compose up --detach --wait postgresql
 
 #start-fresh-instance:
 #    docker compose up --force-recreate --renew-anon-volumes --detach --wait
@@ -16,7 +19,10 @@ console:
     psql --dbname "$CONNECTION_STRING"
 
 shell:
-    docker exec --interactive --tty --user=root db-training-postgresql-1 bash
+    docker exec --interactive --tty --user=root postgresql bash
+
+storage:
+    docker exec --interactive --tty --user=root --workdir=/var/lib/postgresql/data postgresql bash
 
 logs:
     docker logs --follow postgresql

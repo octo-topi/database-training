@@ -95,11 +95,22 @@ Linting (optional):
 
 ## Medium : technical leaders and senior developers
 
-### Scope
+### Scope and cost
+
+Creation: 9 days, spent 4.5
 
 Duration: 6 days
 
-Day 1 : performance
+Parts
+- [one : basics - 3 days ](medium/content/basics/):
+  - heap : pro/cons, storage layout (blocks)
+  - monitor a query : execution plan, statistics
+  - index : pro/cons, storage layout, optimization
+  - tuning : 
+- [two : performance tests - 2 days](medium/content/performance-tests) 
+- [three : application integration - 1 day](medium/content/application-integration)
+
+Day 1 : heap, execution plan, cache, MVCC
 - heap : large random-access files
 - cache : speed up queries
   - choose its size, modify it
@@ -112,7 +123,7 @@ Day 1 : performance
 - data modification : its cost
 - partitions : another access path
 
-
+Day 2 : indexes
 - why using indexes ? index theory
 - access paths (index or heap) and filtering
 
@@ -123,17 +134,13 @@ Day 1 : performance
   - modifying data and updating statistics
   - use only execution plan to estimate execution time
 
-Day 2 : performance 
+Day 3 : performance 
 - benchmarking using `pg_stat_statements`
 - scaling : counter-intuitive phenomenons
   - latency of indirections in production
   - more capacity, not faster
 - data modification : index update cost (1 index)
 
-Day 3 : performance
-- an overall view: end-to-end tests
-
-Creation: 9 days
 
 ### Pre-requisite
 
@@ -281,7 +288,7 @@ Sub-partitioning
 #### Text
 Store and query text:
 - fulltext search
-- `pg_trgm`, fuzzystrmatch, Levenshtein
+- `pg_trgm`, `fuzzystrmatch`, Levenshtein
 
 #### JSON
 Store and query JSON
