@@ -110,17 +110,29 @@ Parts
 - [two : performance tests - 2 days](medium/content/performance-tests) 
 - [three : application integration - 1 day](medium/content/application-integration)
 
-Day 1 : heap, execution plan, cache, MVCC
+Day 1 : execution plan + heap, cache, MVCC
+
+By the end of the day, you should know about
 - heap : large random-access files
+  - locate the file
+  - how it grows when inserting, modifying, deleting data
 - cache : speed up queries
-  - choose its size, modify it
-  - find its content, clear it
+  - track its impact : execution plan, execution time 
+  - explore its content
+  - clear the cache
+  - force-load the cache
 - MVCC and its impact on performance
-  - visibility map (a glance)
-- access data in heap
-- statistics and distribution
-- reading an execution plan (chosen path) and check if appropriate
-- data modification : its cost
+  - dead_rows, bloat 
+  - optimization : visibility map
+- statistics 
+  - row count
+  - data distribution
+- reading an execution plan
+  - nodes
+  - access path
+  - volume, estimated and actual
+  - cost, unit and total
+- data modification : impact on performance
 - partitions : another access path
 
 Day 2 : indexes

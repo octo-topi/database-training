@@ -8,12 +8,13 @@ What we'll survey:
 ## Database implementation
 
 Why don't we use CSV files on S3 buckets ?
+Because we want to enforce data integrity. 
 
 You can't use a database without index, why ?
 Because access would be slow, why ?
 Because data should be read on fs, which is 10⁵ slower that memory, why ?
 Because it can't fit in memory, why ?
-Because huge amount of data today
+Because huge amount of data today, and memory is expensive.
 
 ## Table is heap
 
@@ -25,23 +26,62 @@ There is several data structures in database to store data:
 We usually refer "heap-organized" table, and this is the only storage available in PostgreSQL.
 
 What is a heap ?
+
 It is not [the usual definition](https://stackoverflow.com/questions/1699057/why-are-two-different-concepts-both-called-heap) 
-It is rather an area of storage which is unsorted (as in laundry heap).
+It is rather an area of storage which is unsorted, as in laundry heap.
+You put all you used clothes in your laundry basket, in no order but of use.
+You need to wash all clothes in one batch, you don't need to sort them.
+But once washed and dried, you don't store all clothes in one heap, you put apart trousers and socks.
 
-heap = large random-access files
-random-access = sequential access
-random-access <> index access
+Heap is optimized for: 
+- write, to be able to persist data as fast as possible;
+- read, if you access all data.
 
-you had to read 
-- the whole table if you want to find all record matching a criteria
-- unless you know there is one record only (it is unique), but you may end up reading the whole table
+Heap is not optimized for :
+- read, if you need some data.
 
-Algorithmic complexity is in the N order - O(n)
+## FS foundations - Move below
 
+PostgreSQL use the OS to read and write to the filesystem.
+
+All OS, when dealing with filesystems, use a small unit called block, or page, whose size is usually 4kb.
+You can't read or write less than this unit from the OS, even if the block size of the disk is smaller.
+
+PostgreSQL use a 8kb block size, which means that 1 block in database is 2 blocks in OS.
+
+PostgreSQL cannot read or write from disk by himself, he should ask the OS to do so.
+He won't even read or write from the disk, but from the OS cache.
+
+Heap allow sequential access, indexes allow indexed access.
+
+We'll talk later about random access, but let's make something clear.
+Random access refers to accessing successively different physical location on a device.
+If the device is RAM, or solid-state drive, the overall cost is the unit cost * access count.
+If the device is a hard-disk drive, the overall cost may be less if all data is stored: 
+- on contiguous blocks in the same platter;
+- if the platter are read successively by the arm.
+
+However:
+- OS does not allocate space contiguously;
+- space is reused by PostgreSQL in the same table.
+
+That means that even if you read a whole table, you may not read data sequentially on disk, so the access can be random. 
+
+If you need some data (filter using a criteria):
+- usually, you have to read all the table
+- unless you need a few records only (TOP-N, reporting) - but you may end up reading the whole table if you don't find one
+- unless you know there is one record only (it is unique) - but you may end up reading the whole table if you don't find one
+- unless you have its physical location( `ctid`) - but such location changes frequently
+
+Algorithmic complexity 
+- linear search : O(N)
+- b-tree : O(log(n))
+
+[index, random, sequential terminology](https://stackoverflow.com/questions/42598716/difference-between-indexed-based-random-access-and-sequential-access)
 
 ## Create a table
 
-Create table
+Create a table
 ```postgresql
 DROP TABLE IF EXISTS mytable ;
 
@@ -58,13 +98,17 @@ Each table is stored in a different file; when table grows, more file are create
 > When a table exceeds 1 GB, it is divided into gigabyte-sized segments.
 > The first segment's file name is the same as the filenode; subsequent segments are named filenode.1, filenode.2, etc. This arrangement avoids problems on platforms that have file size limitations.
 > A table that has columns with potentially large entries will have an associated TOAST table, which is used for out-of-line storage of field values that are too large to keep in the table rows proper.
+
 from [PostgreSQL doc](https://www.postgresql.org/docs/current/storage-file-layout.html)
+
+If you record exceeds 8kb, it will be stored separately in a file named TOAST.
 
 > PostgreSQL uses a fixed page size (commonly 8 kB), and does not allow tuples to span multiple pages.
 > Therefore, it is not possible to store very large field values directly.
 > To overcome this limitation, large field values are compressed and/or broken up into multiple physical rows.
 > This happens transparently to the user, with only small impact on most of the backend code.
 > The technique is affectionately known as TOAST (or “the best thing since sliced bread”, The Oversized-Attribute Storage Technique).
+
 from [PostgreSQL doc](https://www.postgresql.org/docs/current/storage-toast.html)
 
 [More](https://www.interdb.jp/pg/pgsql01/02.html#123-layout-of-files-associated-with-tables-and-indexes)
@@ -98,13 +142,16 @@ Get file size again
 ```shell
 ls -lh base/5/16392
 ```
+
+```text
 -rw------- 1 postgres postgres 8192 Jul 29 07:40 base/5/16392
+```
 
 The file is 8192, why ?
 
 ## How is a row stored ?
 
-PostgreSQL allocate space in filesystem in chunks to improver performance :
+PostgreSQL allocate space in filesystem in chunks to improve performance :
 - several rows will be written;
 - allocate space (writing a file) require a system call which is expensive.
 
@@ -113,28 +160,38 @@ These chunks are called blocks, their size is 8 kBytes = 8 * 1 024 bytes = 8 192
 Rows are stored in these blocks.
 Rows are also called tuples or items.
 
-A row can have a variable length (e.g. text), only its content is stored : NULL values does not store any content.
+A row is stored contiguously, we have a "row store" - not a column store as in BigQuery.
+
+A row will have a variable length, e.g. if using variable-size text.
+
+Note:
+- fixed-size field may be stored [using more space than needed](https://www.cybertec-postgresql.com/en/type-alignment-padding-bytes-no-space-waste-in-postgresql/) : 
+- NULL values does not store any content.
+
 To be able to access variable-length rows quickly, in an indexed way, we should use pointers.
+
 To save more space, as we can't know how many rows will be stored:
 - pointer are stored at block's start;
 - rows are stored at block's end.
 
 PostgreSQL need to access row quickly internally (e.g. for indexes) and can't use the row primary key (it may not exist).
-So it use an internal identifier. But to save even more space, we may need to move row in the block without updating this internal identifier.
+So it use an internal identifier, which relate to the physical address. 
+
+But to save even more space, we may need to move row in the block without updating this internal identifier.
 
 How can we do that ? We recall the fundamental theorem of software engineering
 > We can solve any problem by introducing an extra level of indirection
 
 We'll use a pointer to pointer :
-- row adresses are hidden;
-- block pointer expose an identifier called Currrent Tuple IDentifier (CTID);
+- row addresses are hidden;
+- block pointer expose an identifier called Current Tuple IDentifier (CTID);
 - its syntax is `(block_number, row_number)` e.g. `(0, 1)`.
 
 ```postgresql
 SELECT id, ctid
 FROM mytable
 WHERE 1=1
-    AND id = 1
+    AND id = -1
     AND ctid = '(0,1)'
 ```          
 
@@ -144,6 +201,7 @@ WHERE 1=1
 > Following are item identifiers, the rows themselves are stored in space allocated backwards from the end of unallocated space.
 > Because an item identifier is never moved until it is freed, its index can be used on a long-term basis to reference an item.
 > Every pointer to an item created by PostgreSQL consists of a page number and the index of an item identifier.
+
 [PostgreSQL docs](https://www.postgresql.org/docs/current/storage-page-layout.html#STORAGE-TUPLE-LAYOUT)
 
 [More](https://www.interdb.jp/pg/pgsql01/03.html)
@@ -153,15 +211,18 @@ WHERE 1=1
 Add many rows: 10 million (last 40 seconds)
 ```postgresql
 INSERT INTO mytable (id)
-SELECT 2
+SELECT n
 FROM generate_series(1, 10000000) AS n;
 ```
 
 Check what happened on disk
 ```shell
-ls -l base/5/16392
+du -sh base/16384/16401
 ```
--rw------- 1 postgres postgres 346M Jul 29 08:37 base/5/16385
+
+```text
+346M	base/16384/16401
+```
 
 The data has been written to disk, 346 MB
 
@@ -170,13 +231,37 @@ Check logs
 2025-07-29 08:37:16.187 UTC [27] LOG:  checkpoint starting: wal
 ```
 
-## Get size easily
+If you want to get the blocks on fs, get the volume 
 
-If we want to know the size without connecting to container fs, can call this function
-```postgresql
-SELECT pg_table_size('mytable') table_block_count
+Check `Mountpoint`
+```shell
+docker inspect sandbox_postgresql_data;
 ```
-362 586 112 blocks
+
+On Linux, it is `/var/lib/docker/volumes/sandbox_postgresql_data/_data/base/16384/16385`
+
+Then run on host
+```shell
+sudo hdparm --fibmap  /var/lib/docker/volumes/sandbox_postgresql_data/_data/base/16384/16385
+```
+
+You'll get the block span
+```text
+ filesystem blocksize 4096, begins at LBA 0; assuming 512 byte sectors.
+ byte_offset  begin_LBA    end_LBA    sectors
+           0  526071904  526071919         16
+        8192  755184728  755233863      49136
+    25165824  692322304  692355071      32768
+(..)
+```
+
+## Get table size easily
+
+If we want to know the size without connecting to container fs, we call this function.
+```postgresql
+SELECT pg_table_size('mytable') table_size_bytes
+```
+362 586 112
 
 Convert to size using `pg_size_pretty`
 ```postgresql
@@ -194,6 +279,16 @@ WHERE 1=1
    AND relname = 'mytable'
 ;
 ```
+
+[More size statistics](https://www.postgresql.org/docs/current/functions-admin.html#FUNCTIONS-ADMIN-DBSIZE)
+
+How many blocks ?
+```postgresql
+SELECT relpages block_count
+FROM pg_class WHERE relname = 'mytable';
+```
+
+44 248
 
 ## Access rows and get table usage 
 
@@ -224,6 +319,8 @@ WHERE 1=1
 | events:  | 10000001      | 0             | 0             | 2025-07-29 08:55:55.281912 +00:00 | 10                |
 
 
+## Modify rows 
+
 Trigger events and check they appear
 ```postgresql
 UPDATE mytable 
@@ -243,6 +340,24 @@ Delete an existing row
 DELETE FROM mytable
 WHERE id = 1;
 ```
+
+```postgresql
+SELECT
+     'events:'
+     ,stt.n_tup_ins                     insert_count
+     ,stt.n_tup_upd + stt.n_tup_hot_upd update_count
+     ,stt.n_tup_del                     delete_count
+     ,stt.last_seq_scan                 last_read
+     ,stt.seq_tup_read                  rows_read_count
+--,stt.*
+FROM pg_stat_user_tables stt
+WHERE 1=1
+  AND relname = 'mytable'
+;
+```
+
+
+## Reuse space
 
 Delete all rows
 ```postgresql
@@ -266,7 +381,148 @@ SELECT *
 FROM mytable
 ```
 
-You can actually give back the disk space to OS 
+Add many rows: 10 million (last 40 seconds)
+```postgresql
+INSERT INTO mytable (id)
+SELECT n
+FROM generate_series(1, 10000000) AS n;
+```
+
+Check size
+```postgresql
+SELECT pg_size_pretty(pg_table_size('mytable'))  table_size
+```
+692 MB
+
+The space has not been freed.
+
+Can we check unused space, and reuse it ?
+```postgresql
+SELECT
+   stt.relname                        table_name
+   ,stt.n_live_tup                    active_row_count
+   ,stt.n_dead_tup                    deleted_row_count
+FROM pg_stat_user_tables stt
+WHERE 1=1
+   AND relname = 'mytable'
+;
+```
+
+| table\_name | active\_row\_count | deleted\_row\_count |
+|:------------|:-------------------|:--------------------|
+| mytable     | 10000000           | 10000000            |
+
+
+Let's reuse it
+```postgresql
+VACUUM VERBOSE mytable;
+```
+
+Check message
+```text
+tuples: 10000000 removed, 10000000 remain, 0 are dead but not yet removable
+```
+
+Check deleted rows are not here anymore.
+```postgresql
+SELECT
+   stt.relname                        table_name
+   ,stt.n_live_tup                    active_row_count
+   ,stt.n_dead_tup                    deleted_row_count
+FROM pg_stat_user_tables stt
+WHERE 1=1
+   AND relname = 'mytable'
+;
+```
+
+| table\_name | active\_row\_count | deleted\_row\_count |
+|:------------|:-------------------|:--------------------|
+| mytable     | 10000000           | 0                   |
+
+
+Check size
+```postgresql
+SELECT pg_size_pretty(pg_table_size('mytable'))  table_size
+```
+Still 692 MB
+
+Let's add rows again
+```postgresql
+INSERT INTO mytable (id)
+SELECT n
+FROM generate_series(1, 10000000) AS n;
+```
+
+Check size
+```postgresql
+SELECT pg_size_pretty(pg_table_size('mytable'))  table_size
+```
+Still 692 MB: rows are been inserted without using more space
+
+## Give back unused space to OS
+
+Let's delete most of the rows
+```postgresql
+DELETE FROM mytable
+WHERE id > 1000;
+
+SELECT COUNT(*) FROM mytable;
+```
+
+And mark them for reuse
+```postgresql
+VACUUM VERBOSE mytable;
+```
+
+Let's suppose we load some table by error and want to give back the space to OS, so it can use it, by example for another table.
+
+First, you cannot search the stats to check if there is a lot of space to reuse.
+```postgresql
+SELECT
+   stt.*
+FROM pg_stat_user_tables stt
+WHERE 1=1
+   AND relname = 'mytable'
+;
+```
+
+The [native solution](https://github.com/pgexperts/pgx_scripts/blob/master/bloat/table_bloat_check.sql) is to compare:
+- the size of the data;
+- the size of the table.
+
+A friendlier solution is to use an extension.
+```postgresql
+CREATE EXTENSION pgstattuple;
+```
+```postgresql
+SELECT
+    pg_size_pretty(tuple_len)       alive_size,
+    pg_size_pretty(dead_tuple_len)  dead_size,
+    pg_size_pretty(free_space)      unused_size,
+    pg_size_pretty(table_len)       total_size
+FROM pgstattuple('mytable')    
+```
+
+You can see unused size is 344MB
+| alive\_size | dead\_size | unused\_size | total\_size |
+|:------------|:-----------|:-------------|:------------|
+| 55 kB       | 0 bytes    | 344 MB       | 346 MB      |
+
+
+You can actually give back the unused disk space to OS
+```postgresql
+VACUUM FULL mytable
+```
+
+Check size
+```postgresql
+SELECT pg_size_pretty(pg_table_size('mytable'))  table_size
+```
+72 kB
+
+## Empty the table
+
+If you need to delete all rows, use `TRUNCATE` instead of `DELETE`, as it will release the space automatically.
 ```postgresql
 TRUNCATE TABLE mytable
 ```
@@ -282,11 +538,27 @@ SELECT pg_size_pretty(pg_table_size('mytable'))  table_size
 ```
 0 bytes
 
+Remember that table statistics keep on going, even if you truncated the table.
+```postgresql
+SELECT
+     'events:'
+     ,stt.n_tup_ins                     insert_count
+     ,stt.n_tup_upd + stt.n_tup_hot_upd update_count
+     ,stt.n_tup_del                     delete_count
+     ,stt.last_seq_scan                 last_read
+     ,stt.seq_tup_read                  rows_read_count
+--,stt.*
+FROM pg_stat_user_tables stt
+WHERE 1=1
+  AND relname = 'mytable'
+;
+``` 
 
-You can also reset these stats (but not in production)
+If you need it, you can reset these stats
 ```postgresql
 SELECT pg_stat_reset_single_table_counters('mytable'::regclass);
 ```
+
 
 ## How database actually access data ?
 
@@ -315,14 +587,16 @@ Seq Scan on mytable  (cost=0.00..35.50 rows=2550 width=4)
 
 Let's decode it
 ```text
-$operation on $object  (cost=$first_row..$last_row rows=$row_count    $width)
-Seq Scan   on mytable  (cost=0.00..35.50           rows=2550          width=4)
+$operation on $object  (cost=$setup..$total    rows=$row_count    width=$average_size_row_bytes)
+Seq Scan   on mytable  (cost=0.00..35.50       rows=2550          width=4)
 ```
+
+[doc](https://www.postgresql.org/docs/current/using-explain.html)
 
 So:
 - operation : `Seq scan`, stands for sequential scan
-- object    : `mytable` table; it can be an index, a partition
-- cost      : `0` for the first row, then `35` for all following 
+- object    : `mytable` table; it can also be an index, a partition
+- cost      : `0` for the setup, then `35` for retrieving all rows 
 - row count : `2 500` rows are expected to be returned from scan 
 - width     : each result returned will be around `4` bytes  
 
@@ -440,6 +714,7 @@ Planning Time: 0.095 ms
 Execution Time: 0.034 ms
 ```
 
+TODO: do we have many lines or none ?
 It shows up as a filter 
 ```text
   Filter: (id = 1)
@@ -487,9 +762,6 @@ Filter: (id = 2)
 Rows Removed by Filter: 1
 ```
 
-
-
-
 Query table
 ```postgresql
 EXPLAIN (ANALYZE)
@@ -497,11 +769,6 @@ SELECT id
 FROM mytable
 WHERE id = -1
 ```
-
-
-
-
-
 
 Let's update statistics
 ```postgresql
