@@ -1,5 +1,9 @@
-# Subject
+# Access paths
 
+
+## Parallel seq scan
+
+## Partitions
 ```postgresql
 SELECT
  't'

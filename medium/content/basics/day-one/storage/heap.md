@@ -40,44 +40,6 @@ Heap is optimized for:
 Heap is not optimized for :
 - read, if you need some data.
 
-## FS foundations - Move below
-
-PostgreSQL use the OS to read and write to the filesystem.
-
-All OS, when dealing with filesystems, use a small unit called block, or page, whose size is usually 4kb.
-You can't read or write less than this unit from the OS, even if the block size of the disk is smaller.
-
-PostgreSQL use a 8kb block size, which means that 1 block in database is 2 blocks in OS.
-
-PostgreSQL cannot read or write from disk by himself, he should ask the OS to do so.
-He won't even read or write from the disk, but from the OS cache.
-
-Heap allow sequential access, indexes allow indexed access.
-
-We'll talk later about random access, but let's make something clear.
-Random access refers to accessing successively different physical location on a device.
-If the device is RAM, or solid-state drive, the overall cost is the unit cost * access count.
-If the device is a hard-disk drive, the overall cost may be less if all data is stored: 
-- on contiguous blocks in the same platter;
-- if the platter are read successively by the arm.
-
-However:
-- OS does not allocate space contiguously;
-- space is reused by PostgreSQL in the same table.
-
-That means that even if you read a whole table, you may not read data sequentially on disk, so the access can be random. 
-
-If you need some data (filter using a criteria):
-- usually, you have to read all the table
-- unless you need a few records only (TOP-N, reporting) - but you may end up reading the whole table if you don't find one
-- unless you know there is one record only (it is unique) - but you may end up reading the whole table if you don't find one
-- unless you have its physical location( `ctid`) - but such location changes frequently
-
-Algorithmic complexity 
-- linear search : O(N)
-- b-tree : O(log(n))
-
-[index, random, sequential terminology](https://stackoverflow.com/questions/42598716/difference-between-indexed-based-random-access-and-sequential-access)
 
 ## Create a table
 
@@ -187,6 +149,11 @@ We'll use a pointer to pointer :
 - block pointer expose an identifier called Current Tuple IDentifier (CTID);
 - its syntax is `(block_number, row_number)` e.g. `(0, 1)`.
 
+
+![Block layout.png](block-layout.png)
+
+
+You can query using the pointer
 ```postgresql
 SELECT id, ctid
 FROM mytable
@@ -203,6 +170,11 @@ WHERE 1=1
 > Every pointer to an item created by PostgreSQL consists of a page number and the index of an item identifier.
 
 [PostgreSQL docs](https://www.postgresql.org/docs/current/storage-page-layout.html#STORAGE-TUPLE-LAYOUT)
+
+
+All in all, the storage looks like this
+![Storage overview](storage-overview.png)
+
 
 [More](https://www.interdb.jp/pg/pgsql01/03.html)
 
@@ -229,30 +201,6 @@ The data has been written to disk, 346 MB
 Check logs
 ```text
 2025-07-29 08:37:16.187 UTC [27] LOG:  checkpoint starting: wal
-```
-
-If you want to get the blocks on fs, get the volume 
-
-Check `Mountpoint`
-```shell
-docker inspect sandbox_postgresql_data;
-```
-
-On Linux, it is `/var/lib/docker/volumes/sandbox_postgresql_data/_data/base/16384/16385`
-
-Then run on host
-```shell
-sudo hdparm --fibmap  /var/lib/docker/volumes/sandbox_postgresql_data/_data/base/16384/16385
-```
-
-You'll get the block span
-```text
- filesystem blocksize 4096, begins at LBA 0; assuming 512 byte sectors.
- byte_offset  begin_LBA    end_LBA    sectors
-           0  526071904  526071919         16
-        8192  755184728  755233863      49136
-    25165824  692322304  692355071      32768
-(..)
 ```
 
 ## Get table size easily
@@ -318,6 +266,8 @@ WHERE 1=1
 |:---------|:--------------|:--------------|:--------------|:----------------------------------|:------------------|
 | events:  | 10000001      | 0             | 0             | 2025-07-29 08:55:55.281912 +00:00 | 10                |
 
+
+[Reference](https://www.postgresql.org/docs/current/monitoring-stats.html#MONITORING-PG-STATIO-ALL-TABLES-VIEW)
 
 ## Modify rows 
 
@@ -557,305 +507,5 @@ WHERE 1=1
 If you need it, you can reset these stats
 ```postgresql
 SELECT pg_stat_reset_single_table_counters('mytable'::regclass);
-```
-
-
-## How database actually access data ?
-
-Let's start afresh.
-```postgresql
-DROP TABLE IF EXISTS mytable ;
-
-CREATE TABLE mytable (
-    id  integer
-) WITH (autovacuum_enabled = FALSE);
-
-INSERT INTO mytable (id) VALUES (-1);
-```
-
-You can get execution plan, what is expected to happen
-```postgresql
-EXPLAIN
-SELECT id 
-FROM mytable
-```
-
-We get
-```text
-Seq Scan on mytable  (cost=0.00..35.50 rows=2550 width=4)
-```
-
-Let's decode it
-```text
-$operation on $object  (cost=$setup..$total    rows=$row_count    width=$average_size_row_bytes)
-Seq Scan   on mytable  (cost=0.00..35.50       rows=2550          width=4)
-```
-
-[doc](https://www.postgresql.org/docs/current/using-explain.html)
-
-So:
-- operation : `Seq scan`, stands for sequential scan
-- object    : `mytable` table; it can also be an index, a partition
-- cost      : `0` for the setup, then `35` for retrieving all rows 
-- row count : `2 500` rows are expected to be returned from scan 
-- width     : each result returned will be around `4` bytes  
-
-The cost is arbitrary
-
-Why do we have 2 550 rows expected ?
-
-Update query-planner statistics
-```postgresql
-ANALYZE VERBOSE mytable;
-```
-
-We get
-```text
-Seq Scan on mytable  (cost=0.00..35.50 rows=2550 width=4)
-```
-
-Run again
-```postgresql
-EXPLAIN
-SELECT id 
-FROM mytable
-```
-
-This time, we got the right estimate
-```text
-Seq Scan on mytable  (cost=0.00..1.01 rows=1 width=4)
-```
-
-We can get actual rows and timings by executing query with `ANALYZE` option 
-```postgresql
-EXPLAIN (ANALYZE)
-SELECT id 
-FROM mytable
-```
-
-We get
-```text
-Seq Scan on mytable  (cost=0.00..1.01 rows=1 width=4) (actual time=0.011..0.013 rows=1 loops=1)
-```
-
-Let's decode it
-```text
-$operation on $object  ($expected)                      (actual time=$first_row..$last_row rows=$row_count loops=$loops)
-Seq Scan on mytable    (cost=0.00..1.01 rows=1 width=4) (actual time=0.011..0.013          rows=1          loops=1)
-```
-
-So:
-- time      : `0.011` ms for the first row, then `0.013` for all following
-- row count : `1` row was returned from scan
-- loops     : the operation has been done  `1` time
-
-
-We also get two additional lines
-```text
-Planning Time: 0.036 ms
-Execution Time: 0.026 ms
-```
-
-We can see the planning time exceed the access time
-
-
-Add many rows: 10 million (last 40 seconds)
-```postgresql
-INSERT INTO mytable (id)
-SELECT 2
-FROM generate_series(1, 10000000) AS n;
-
-ANALYZE mytable;
-```
-
-
-Run again
-```postgresql
-EXPLAIN (ANALYZE)
-SELECT id 
-FROM mytable
-```
-
-The figures are quite different.
-```text
-Seq Scan on mytable  (cost=0.00..144247.79 rows=9999979 width=4) (actual time=0.015..1031.529 rows=10000001 loops=1)
-Planning Time: 0.077 ms
-Execution Time: 2180.771 ms
-```
-
-The estimation has increased: the cost went from <1 to 44k, because 10 millions rows are expected.
-The execution now last 2 seconds, much more than planning time.  
-
-
-Run again
-```postgresql
-EXPLAIN (ANALYZE)
-SELECT id 
-FROM mytable
-LIMIT 1
-```
-
-## Predicate and filter
-
-Query table with predicate
-```postgresql
-EXPLAIN (ANALYZE, BUFFERS)
-SELECT id 
-FROM mytable
-WHERE id=1
-```
-
-```text
-Seq Scan on mytable  (cost=0.00..1.01 rows=1 width=4) (actual time=0.017..0.017 rows=0 loops=1)
-  Filter: (id = 1)
-  Rows Removed by Filter: 1
-  Buffers: shared hit=1
-Planning Time: 0.095 ms
-Execution Time: 0.034 ms
-```
-
-TODO: do we have many lines or none ?
-It shows up as a filter 
-```text
-  Filter: (id = 1)
-  Rows Removed by Filter: 1
-```
-
-Add data (10 million - 40 seconds) 
-```postgresql
-INSERT INTO mytable (id)
-SELECT 2
-FROM generate_series(1, 10000000) AS n;
-```
-
-Query table
-```postgresql
-EXPLAIN (ANALYZE)
-SELECT id 
-FROM mytable
-WHERE id = -1
-```
-
-```text
-Seq Scan on mytable  (cost=0.00..44801.10 rows=1 width=4) (actual time=943.653..943.654 rows=1 loops=1)
-  Filter: (id = 1)
-  Rows Removed by Filter: 10000000
-Planning Time: 0.048 ms
-Execution Time: 943.688 ms
-```
-
-We still have 1 row expected and 1 row actual
-What about querying on value 2 ?
-
-Query table
-```postgresql
-EXPLAIN (ANALYZE)
-SELECT id 
-FROM mytable
-WHERE id = 2
-```
-
-It expects
-```text
-Seq Scan on mytable  (cost=0.00..169248.60 rows=10000048 width=4) (actual time=26.939..1169.128 rows=10000000 loops=1)
-Filter: (id = 2)
-Rows Removed by Filter: 1
-```
-
-Query table
-```postgresql
-EXPLAIN (ANALYZE)
-SELECT id 
-FROM mytable
-WHERE id = -1
-```
-
-Let's update statistics
-```postgresql
-ANALYZE VERBOSE mytable;
-```
-
-Query table
-```postgresql
-EXPLAIN (ANALYZE)
-SELECT id 
-FROM mytable
-WHERE id = 1
-```
-## Data distribution
-
-Query-planner statistics
-```postgresql
-SELECT
-     s.n_distinct        distinct_values
-    ,s.most_common_vals  most_common_values_count
-    ,s.most_common_freqs most_common_values_frequency
-    ,s.correlation       correlation_column_block_order 
-    ,s.avg_width         size_bytes   
-    ,TRUNC(s.null_frac * 100) || '%'  null_ratio 
---     ,'pg_stats'
-    ,s.*
-FROM pg_stats s
-WHERE 1=1
-    AND s.tablename = 'mytable'
-    AND s.attname = 'id'
-```
-No statistics
-
-Query table
-```postgresql
-EXPLAIN (ANALYZE, BUFFERS)
-SELECT id, ctid 
-FROM mytable
-```
-
-Query table : aggregation
-```postgresql
-EXPLAIN (ANALYZE, BUFFERS)
-SELECT id, COUNT(1) 
-FROM mytable
-GROUP BY id 
-ORDER BY COUNT(1) DESC 
-```
-
-We want :
-- 10 % 1
-- 40 % 2
-- 50 % 3
-
-```postgresql
-INSERT INTO mytable (id)
-SELECT 1
-FROM generate_series(1, 10/100 * 1000) AS n;
-    
-INSERT INTO mytable (id)
-SELECT 2
-FROM generate_series(1, 40/100 * 1000) AS n;
-
-INSERT INTO mytable (id)
-SELECT NULL
-FROM generate_series(1, 50/100 * 1000) AS n;
-```
-
-Statistics
-```postgresql
-ANALYZE VERBOSE mytable;
-```
-
-Query-planner statistics
-```postgresql
-SELECT
-     s.n_distinct        distinct_values
-    ,s.most_common_vals  most_common_values_count
-    ,s.most_common_freqs most_common_values_frequency
-    ,s.correlation       correlation_column_block_order 
-    ,s.avg_width         size_bytes   
-    ,TRUNC(s.null_frac * 100) || '%'  null_ratio 
---     ,'pg_stats'
-    ,s.*
-FROM pg_stats s
-WHERE 1=1
-    AND s.tablename = 'mytable'
-    AND s.attname = 'id'
 ```
 

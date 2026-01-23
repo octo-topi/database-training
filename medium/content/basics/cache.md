@@ -6,8 +6,8 @@ Use `BUFFERS` option in execution plan
 
 Activate extensions
 ```postgresql
-CREATE EXTENSION pg_buffercache;
-CREATE EXTENSION pg_prewarm;
+CREATE EXTENSION IF NOT EXISTS pg_buffercache;
+CREATE EXTENSION IF NOT EXISTS pg_prewarm;
 ```
 
 ## Monitor cache
@@ -15,8 +15,8 @@ CREATE EXTENSION pg_prewarm;
 Cache overview
 ```postgresql
 SELECT 
-    pg_size_pretty(c.buffers_used * 8 * 1024::numeric) used,
-    pg_size_pretty(c.buffers_unused* 8 * 1024::numeric) free,
+    pg_size_pretty(c.buffers_used   * 8 * 1024::numeric) used,
+    pg_size_pretty(c.buffers_unused * 8 * 1024::numeric) free,
     c.buffers_dirty  dirty_count,
     c.buffers_pinned pinned_count,
     TRUNC(c.usagecount_avg) || ' %' used
