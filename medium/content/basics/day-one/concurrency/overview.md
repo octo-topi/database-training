@@ -1,5 +1,16 @@
 ## Overview
 
+To achieve data consistency, we need transaction.
+A transaction is a set of operations that should succeed, of fail, as a whole (atomic).
+
+Therefore:
+- data that has been created should be discarded;
+- data that has been modified should be put back to its initial state;
+- data that has been deleted should be restored.
+
+When several transactions are executed in parallel, another feature arise to achieve consistency, this is isolation of each transaction from the other. You cannot isolate them completely without performance penalties, as in executing them serially rather than in parallel, but you can get reasonable tradeoffs. Such a feature is called isolation level.
+
+
 ## MVCC
 
 Transaction shall be separated from each other; at the very least, they should not see the change other transactions have made but not committed. That's the meaning of "Read commited" isolation level", the default setting in PostgreSQL.

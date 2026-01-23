@@ -1,16 +1,7 @@
-PostgreSQL use the OS to read and write to the filesystem.
-
-All OS, when dealing with filesystems, use a small unit called block, or page, whose size is usually 4kb.
-You can't read or write less than this unit from the OS, even if the block size of the disk is smaller.
-
-PostgreSQL use a 8kb block size, which means that 1 block in database is 2 blocks in OS.
-
-PostgreSQL cannot read or write from disk by himself, he should ask the OS to do so.
-He won't even read or write from the disk, but from the OS cache.
+## random access
 
 Heap allow sequential access, indexes allow indexed access.
 
-We'll talk later about random access, but let's make something clear.
 Random access refers to accessing successively different physical location on a device.
 If the device is RAM, or solid-state drive, the overall cost is the unit cost * access count.
 If the device is a hard-disk drive, the overall cost may be less if all data is stored: 

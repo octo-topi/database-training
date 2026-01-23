@@ -228,6 +228,8 @@ You should not see :
 - data not yet commited (transaction in progress);
 - data whose transaction has been rolled back.
 
+You can see the version that has already appeared and has not been deleted yet.
+
 We end up with these rules.
 
 | status xmin | status xmax | visible |
@@ -466,12 +468,30 @@ You can use a feature call fillfactor to keep some space in the block for row's 
 
 Therefore, an UPDATE with happens afterward on the block can use the space of the dead version to create a new version: you didn't have to trigger a VACUUM on the whole table and you have its benefits.
 
-There is even more: all live versions in blocks are moved to the end, allowing for a single continuous free space at the beginning.
+There is even more: all live versions in blocks are moved to the end, allowing for a single continuous free space at the beginning: no fragmentation.
 
 Need a fill factor < 100% and update rows several times (INSERT doesn't work)
 
 
  But pointer to tuples are not removed, because they may be referenced by indexes (move this to index section ?)
 
-
 Reference: PostgreSQL Internals, Part I - Isolation and MVCC / Page pruning
+
+
+## Beware of long-running transaction
+
+Until now, we only dealt with one table, but transaction encompass all tables.
+At higher isolation level than default, consistency is extended beyond the duration of a single statement and encompass the whole transaction. Therefore, even rows that have been deleted on ta ble T by a commited transaction should be kept for another still-running transaction, which may access T in the future. That means vacuuming is deffered until this transaction ends.
+
+At the worst, if the transaction keep on for hours or days, the database may allocate more and more disk space, only to handle updates.
+
+> There is only one horizon for the whole database, so if it is being held by a transaction, it is impossible to vacuum any data within this horizon—even if this data has not been accessed by this transaction.
+
+> • If a transaction (no matter whether it is real or virtual) at the Repeatable Read
+or Serializable isolation level is running for a long time, it thereby holds the
+database horizon and defers vacuuming.
+• A real transaction at the Read Committed isolation level holds the database
+horizon in the same way, even if it is not executing any operators (being in the
+“idle in transaction” state).
+
+Reference: PostgreSQL Internals, Part I - Isolation and MVCC / Snapshot
