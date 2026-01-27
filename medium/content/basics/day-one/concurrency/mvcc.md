@@ -334,38 +334,36 @@ If you create a row, update it frequently, and read it seldomly, you will spend 
 Let's demonstrate this.
 
 ````postgresql
+CHECKPOINT;
 TRUNCATE TABLE mytable
 ````
 
 Monitor you disk I/O
 ```shell
-iostat --human 2 | awk 'BEGIN {print "Size(R - W)"} /$DEVICE/  {print $6  " - " $7}'
+iostat --human 10 | awk 'BEGIN {print "Size(R - W)"} /$DEVICE/  {print $6  " - " $7}'
 ```
 
-Add many rows: 100 million (last 40 seconds)
+Add many rows: 10 million (last 4 seconds)
 ```postgresql
 INSERT INTO mytable (id)
 SELECT n
-FROM generate_series(1, 100000000) AS n;
+FROM generate_series(1, 10000000) AS n;
 ```
 
-You get a lot of writes, which is expected
+You get a lot of writes (1GB), which is expected.
+This is bigger than table size because, at least, of WAL.
 ```text
 Size(R - W)
-60,7M - 612,1M
-58,6M - 575,8M
-61,1M - 590,5M
-60,1M - 576,6M
-60,1M - 585,0M
-31,8M - 338,9M
-0,0k - 8,2M
+0,0k - 3,8M
+14,0M - 1,3G
+156,0k - 20,8M
 ```
 
 The table is huge
 ```postgresql
 SELECT pg_size_pretty(pg_table_size('mytable'))  table_size
 ```
-3 GB
+346 MB
 
 Now access all rows
 ```postgresql
@@ -373,18 +371,25 @@ SELECT COUNT(*)
 FROM mytable
 ```
 
-You've got as much write than read, this is about setting hint bits
+You've got as much write than read (220Mb), this is about setting hint bits.
 ```text
 Size(R - W)
-0,0k - 324,0k
-84,5M - 45,3M
-713,8M - 721,6M
-737,3M - 727,3M
-726,5M - 754,2M
-737,6M - 719,5M
-330,6M - 321,4M
-0,0k - 1,2M
-0,0k - 1008,0k
+108,0k - 4,6M
+222,1M - 224,7M
+0,0k - 3,2M
+```
+If you wonder why all rows have not been written (346 - 220 = 122)
+Try this
+
+```postgresql
+CHECKPOINT;
+```
+
+The missing 122 Mb are written.
+```text
+0,0k - 6,3M
+0,0k - 126,5M
+0,0k - 2,3M
 ```
 
 Reference: PostgreSQL Internals, Part I - Isolation and MVCC / Page and tuples / Operations on tuples / Commit

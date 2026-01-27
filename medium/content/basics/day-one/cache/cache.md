@@ -411,7 +411,7 @@ As no table which is bigger than 25% of the cache can be loaded completely, it i
 
 ## Writing 
 
-What happens if we modify a row, that is create a new version ?
+What happens if we modify a row, that is, we create a new version ?
 
 ```postgresql
 SELECT ctid FROM mytable 
@@ -423,13 +423,15 @@ This is block 0
 We update and get the block
 ```postgresql
 UPDATE mytable 
-SET id=1
-WHERE id=-1
+SET id=-1
+WHERE id=1
 RETURNING ctid
 ```
-(442,109)
-This is block 442
+(88495,131)
 
+This is block 88495, tuple 131
+
+The whole block is flagged as `dirty`
 ```postgresql
 SELECT
     b.bufferid       cache_block_id,
@@ -441,17 +443,215 @@ FROM pg_class c
          INNER JOIN pg_database d ON (b.reldatabase = d.oid AND d.datname = current_database())
 WHERE 1=1
     AND c.relname = 'mytable'
-    AND b.relblocknumber = 442
-    AND b.isdirty IS TRUE;
+    AND b.relblocknumber = 88495
+    --AND b.relblocknumber = 1
+    AND b.isdirty IS TRUE
 ```
 
-What if ?
+This is the only one.
+```postgresql
+SELECT
+    c.relname,
+    COUNT(*) dirty_blocks,
+    pg_size_pretty(COUNT(*) * 8 * 1024) dirty_size
+FROM pg_class c
+         INNER JOIN pg_buffercache b ON b.relfilenode = c.relfilenode
+         INNER JOIN pg_database d ON (b.reldatabase = d.oid AND d.datname = current_database())
+WHERE 1=1
+    --AND c.relname = 'mytable'    
+    AND b.isdirty IS TRUE
+GROUP BY 
+    c.relname
 ```
+
+We must make sure this block find its way to disk, sooner or later.
+
+
+## Force writing dirty buffers to disk
+
+We can force writing the block to disk.
+```postgresql
 CHECKPOINT; 
 ```
-It dissapears, written to sikd
-The real problem comes for writing. If a block is modified, it is modified in the cache
+
+It disappears, written to disk.
+```postgresql
+SELECT
+    c.relname,
+    COUNT(*) dirty_blocks,
+    pg_size_pretty(COUNT(*) * 8 * 1024) dirty_size
+FROM pg_class c
+         INNER JOIN pg_buffercache b ON b.relfilenode = c.relfilenode
+         INNER JOIN pg_database d ON (b.reldatabase = d.oid AND d.datname = current_database())
+WHERE 1=1
+    --AND c.relname = 'mytable'    
+    AND b.isdirty IS TRUE
+GROUP BY 
+    c.relname
+```
+
+## Checkpointer
+
+COMMIT should do two things:
+- write WAL buffers into WAL files
+- write dirty buffers into data files
+
+The checkpointer take care of WAL file.
+
+Statistics
+```postgresql
+SELECT 
+    'checkpoint=>'
+    ,cp.num_requested manual_count
+    ,cp.num_timed     automatic_count
+    ,cp.buffers_written block_count
+    ,pg_size_pretty(cp.buffers_written * 8 * 1024) size
+    ,'pg_stat_checkpointer=>'
+    ,cp.*
+FROM
+    pg_stat_checkpointer cp
+```
+
+[Source](https://www.postgresql.org/docs/current/monitoring-stats.html#MONITORING-PG-STAT-CHECKPOINTER-VIEW)
+
+Reset
+```postgresql
+SELECT pg_stat_reset_shared('checkpointer')
+```
+
+WAL is disabled in this database, but we can trigger a checkpoint manually. 
+```postgresql
+CHECKPOINT; 
+```
+
+Check logs
+```text
+LOG: checkpoint starting: immediate force wait
+```
+
+In case WAL files > max_wal_size, you get 
+```text
+LOG : checkpoint starting: wal
+```
+
+```terminal
+just storage
+du -h /var/lib/postgresql/data/pg_wal
+4.0G	/var/lib/postgresql/data/pg_wal
+```
 
 
+## Backend client writes
+
+```postgresql
+DROP TABLE IF EXISTS mytable1 ;
+
+CREATE TABLE mytable1 (
+    id  integer
+) WITH (AUTOVACUUM_ENABLED = FALSE);
+
+EXPLAIN (ANALYZE, BUFFERS)
+INSERT INTO mytable1 (id)
+SELECT n
+FROM generate_series(1, 10000000) AS n;
+```
 
 
+## Background writer
+
+```postgresql
+-- Execution frequency
+SHOW bgwriter_delay; 
+
+-- How many block to write in one pass, at most
+SHOW bgwriter_lru_maxpages; 
+```
+
+
+Background writer statistics (all tables)
+```postgresql
+SELECT 
+     bgw.buffers_clean   blocks_written
+    ,pg_size_pretty(bgw.buffers_clean * 8 * 1024)   size_written
+    ,bgw.buffers_alloc cache_size_blocks
+    ,pg_size_pretty(bgw.buffers_alloc * 8 * 1024)   cache_size
+    ,bgw.maxwritten_clean too_many_buffers_written_count
+    ,bgw.*
+FROM pg_stat_bgwriter bgw
+```
+[Source](https://www.postgresql.org/docs/current/monitoring-stats.html#MONITORING-PG-STAT-BGWRITER-VIEW)
+
+Reset
+```postgresql
+SELECT pg_stat_reset_shared('bgwriter')
+```
+
+## I/O statistics
+
+Context:
+- `bulkread` and `bulkwrite` relate to buffer-ring use
+- `normal` relate to shared buffers use
+```postgresql
+SELECT 'I/O=>' _
+     , io.backend_type
+     , io.object
+     , io.context
+     , 'read:' _
+     , io.reads          blocks
+     , pg_size_pretty(io.reads * io.op_bytes)  size
+     , io.read_time      elapsed
+     , 'w=>OS' _ -- write PG cache => OS cache
+     , io.writes         blocks
+     , pg_size_pretty(io.writes * io.op_bytes)  size
+     , io.write_time     elapsed
+     , 'w=>disk' _ -- write OS cache => disk
+     , io.writebacks     block
+     , io.writeback_time elapsed
+     --, 'pg_stat_io'
+     --, io.*
+FROM pg_stat_io io
+WHERE 1 = 1
+  AND (io.reads > 0 OR io.writes > 0)
+  AND io.backend_type IN (
+                          'checkpointer'
+                          ,'background writer'
+                          ,'client backend'
+    )
+```
+[Source](https://www.postgresql.org/docs/current/monitoring-stats.html#MONITORING-PG-STAT-IO-VIEW)
+[Source](https://www.cybertec-postgresql.com/en/pg_stat_io-postgresql-16-performance/)
+
+
+Cache hit, cache eviction, datafile grows
+```postgresql
+SELECT
+    'I/O=>'
+    ,io.backend_type
+    ,io.object
+    ,io.context
+    ,''
+    ,io.evictions
+    ,io.hits
+    ,io.extends
+    ,'pg_stat_io'
+    ,io.*
+FROM
+ pg_stat_io io
+WHERE 1=1
+    AND io.backend_type IN ('checkpointer', 'background writer', 'client backend')
+    --AND extends > 0
+```
+
+Reset
+```postgresql
+SELECT pg_stat_reset_shared('io')
+```
+
+## Reading execution plans
+
+https://www.depesz.com/2021/06/20/explaining-the-unexplainable-part-6-buffers/
+
+
+```postgresql
+SELECT pg_current_wal_insert_lsn()
+```
