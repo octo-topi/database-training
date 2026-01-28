@@ -7,9 +7,9 @@ On a PaaS, you can assign limits on hardware.
 Locally, we'll rely on docker to achieve this.
 
 Peek into :
-- [environment variables](../../sandbox/.envrc)
-- [docker compose](../../sandbox/docker-compose.yml)
-- [PostgreSQL configuration](../../sandbox/configuration/postgresql.conf)
+- [environment variables](../.envrc)
+- [docker compose](../docker-compose.yml)
+- [PostgreSQL configuration](../configuration/postgresql.conf)
 
 Hardware is limited:
 - 500 Mb RAM;
