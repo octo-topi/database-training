@@ -23,10 +23,10 @@ services:
       POSTGRES_PASSWORD: ${POSTGRESQL_USER_PASSWORD}
       POSTGRES_DB: ${POSTGRESQL_DATABASE_NAME}
     #    https://www.postgresql.org/docs/current/app-postgres.html
-    #    command: postgres $SOME_CONFIGURATION
+    command: docker-entrypoint.sh -c 'config_file=/etc/postgresql/postgresql.conf'
     volumes:
     #  to check expected location, use `SHOW config_file;`
-      - ./configuration/postgresql.conf:/var/lib/postgresql/data/postgresql.conf
+      - ./configuration/postgresql.conf:/etc/postgresql/postgresql.conf
       - postgresql_data:/var/lib/postgresql/data
     healthcheck:
       test: "psql --dbname \"host=localhost port=${POSTGRESQL_INTERNAL_PORT} dbname=${POSTGRESQL_DATABASE_NAME} user=${POSTGRESQL_USER_NAME} password=${POSTGRESQL_USER_PASSWORD}\""

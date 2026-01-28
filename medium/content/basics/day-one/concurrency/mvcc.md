@@ -350,20 +350,21 @@ SELECT n
 FROM generate_series(1, 10000000) AS n;
 ```
 
-You get a lot of writes (1GB), which is expected.
-This is bigger than table size because, at least, of WAL.
+What's table size ?
+```postgresql
+SELECT pg_size_pretty(pg_table_size('mytable'))  table_size
+```
+346 MB
+
+You get a lot of writes, which is expected.
+But why 1GB, more than table size ?
+Because, at least, of WAL files.
 ```text
 Size(R - W)
 0,0k - 3,8M
 14,0M - 1,3G
 156,0k - 20,8M
 ```
-
-The table is huge
-```postgresql
-SELECT pg_size_pretty(pg_table_size('mytable'))  table_size
-```
-346 MB
 
 Now access all rows
 ```postgresql
@@ -391,6 +392,13 @@ The missing 122 Mb are written.
 0,0k - 126,5M
 0,0k - 2,3M
 ```
+
+If you wonder why no WAL files have been written, this is a configuration. This information is not critical.
+
+```postgresql
+SHOW wal_log_hints
+```
+
 
 Reference: PostgreSQL Internals, Part I - Isolation and MVCC / Page and tuples / Operations on tuples / Commit
 

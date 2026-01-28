@@ -502,8 +502,8 @@ Statistics
 ```postgresql
 SELECT 
     'checkpoint=>'
-    ,cp.num_requested manual_count
-    ,cp.num_timed     automatic_count
+    ,cp.num_requested   manual_count
+    ,cp.num_timed       automatic_count
     ,cp.buffers_written block_count
     ,pg_size_pretty(cp.buffers_written * 8 * 1024) size
     ,'pg_stat_checkpointer=>'
@@ -588,6 +588,11 @@ SELECT pg_stat_reset_shared('bgwriter')
 
 ## I/O statistics
 
+
+
+
+You can find overall statistics about who read and write to disk, but WAL statistics before v18.
+
 Context:
 - `bulkread` and `bulkwrite` relate to buffer-ring use
 - `normal` relate to shared buffers use
@@ -611,14 +616,17 @@ SELECT 'I/O=>' _
      --, io.*
 FROM pg_stat_io io
 WHERE 1 = 1
-  AND (io.reads > 0 OR io.writes > 0)
-  AND io.backend_type IN (
-                          'checkpointer'
-                          ,'background writer'
-                          ,'client backend'
-    )
+  --AND (io.reads > 0 OR io.writes > 0)
+--   AND io.backend_type IN (
+--                           'checkpointer'
+--                           ,'background writer'
+--                           ,'client backend'
+--     )
+ORDER BY io.writes DESC
 ```
 [Source](https://www.postgresql.org/docs/current/monitoring-stats.html#MONITORING-PG-STAT-IO-VIEW)
+
+
 [Source](https://www.cybertec-postgresql.com/en/pg_stat_io-postgresql-16-performance/)
 
 
@@ -642,16 +650,15 @@ WHERE 1=1
     --AND extends > 0
 ```
 
-Reset
+You can reset all stats 
+```postgresql
+SELECT pg_stat_reset_shared()
+```
+
+Or reset only I/O
 ```postgresql
 SELECT pg_stat_reset_shared('io')
 ```
 
-## Reading execution plans
-
-https://www.depesz.com/2021/06/20/explaining-the-unexplainable-part-6-buffers/
 
 
-```postgresql
-SELECT pg_current_wal_insert_lsn()
-```

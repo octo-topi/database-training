@@ -1,3 +1,5 @@
+# Filtering
+
 
 
 
@@ -300,3 +302,6 @@ WHERE 1=1
     AND s.attname = 'id'
 ```
 
+## More resources
+
+[How to read an execution plan ?](https://www.depesz.com/2021/06/20/explaining-the-unexplainable-part-6-buffers/)

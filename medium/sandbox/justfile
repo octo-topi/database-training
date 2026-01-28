@@ -10,7 +10,7 @@ restart-instance:
     just stop-instance && just start-instance
 
 remove-volume:
-    docker volume rm sandbox_postgresql_data
+    just stop-instance && docker volume rm sandbox_postgresql_data
 
 # access
 
