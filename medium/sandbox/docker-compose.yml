@@ -27,7 +27,7 @@ services:
     volumes:
     #  to check expected location, use `SHOW config_file;`
       - ./configuration/postgresql.conf:/etc/postgresql/postgresql.conf
-      - postgresql_data:/var/lib/postgresql/data
+      - postgresql_data:/var/lib/postgresql
     healthcheck:
       test: "psql --dbname \"host=localhost port=${POSTGRESQL_INTERNAL_PORT} dbname=${POSTGRESQL_DATABASE_NAME} user=${POSTGRESQL_USER_NAME} password=${POSTGRESQL_USER_PASSWORD}\""
       interval: 1s

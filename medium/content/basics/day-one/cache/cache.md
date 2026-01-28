@@ -596,6 +596,13 @@ You can find overall statistics about who read and write to disk, but WAL statis
 Context:
 - `bulkread` and `bulkwrite` relate to buffer-ring use
 - `normal` relate to shared buffers use
+
+```postgresql
+SELECT DISTINCT backend_type FROM pg_stat_io
+ORDER BY 1
+```
+
+
 ```postgresql
 SELECT 'I/O=>' _
      , io.backend_type
@@ -603,11 +610,11 @@ SELECT 'I/O=>' _
      , io.context
      , 'read:' _
      , io.reads          blocks
-     , pg_size_pretty(io.reads * io.op_bytes)  size
+     , pg_size_pretty(io.read_bytes)  size
      , io.read_time      elapsed
      , 'w=>OS' _ -- write PG cache => OS cache
      , io.writes         blocks
-     , pg_size_pretty(io.writes * io.op_bytes)  size
+     , pg_size_pretty(io.write_bytes)  size
      , io.write_time     elapsed
      , 'w=>disk' _ -- write OS cache => disk
      , io.writebacks     block
@@ -646,7 +653,8 @@ SELECT
 FROM
  pg_stat_io io
 WHERE 1=1
-    AND io.backend_type IN ('checkpointer', 'background writer', 'client backend')
+    AND io.backend_type = 'client backend'
+--    AND io.backend_type IN ('checkpointer', 'background writer', 'client backend')
     --AND extends > 0
 ```
 
@@ -659,6 +667,4 @@ Or reset only I/O
 ```postgresql
 SELECT pg_stat_reset_shared('io')
 ```
-
-
 
