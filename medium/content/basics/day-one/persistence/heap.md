@@ -80,15 +80,19 @@ Find its physical location
 SELECT pg_relation_filepath('mytable')
 FROM pg_settings WHERE name = 'data_directory';
 ```
-base/5/16392
+base/16384/16404
 
 
 Get file size
 ```shell
 just storage
-ls -lh base/5/16392
+ls -lh base/16384/16404
 ```
--rw------- 1 postgres postgres 0 Jul 29 07:37 base/5/16392
+
+You get
+```text
+-rw------- 1 postgres postgres 0 Jan 29 09:42 base/16384/16404
+```
 
 The file is empty (0 bytes)
 
@@ -102,14 +106,36 @@ SELECT * FROM mytable;
 
 Get file size again
 ```shell
-ls -lh base/5/16392
+ls -lh base/16384/16404
 ```
 
+You get
 ```text
--rw------- 1 postgres postgres 8192 Jul 29 07:40 base/5/16392
+-rw------- 1 postgres postgres 8.0K Jan 29 09:42 base/16384/16404
 ```
 
 The file is 8192, why ?
+If we follow the rules below, it should be 4 bytes.
+Where does this 1020 bytes overhead comes from ? 
+
+Fixed-size types are the following. 
+
+| Name      | Storage Size   | 
+|-----------|----------------|
+| integer   | 4 bytes        | 
+| bigint    | 8 bytes        |
+| date      | 4 bytes        |
+| timestamp | 8 bytes        |
+
+[Source](https://www.postgresql.org/docs/18/datatype-numeric.html)
+[Source](https://www.postgresql.org/docs/18/datatype-datetime.htmll)
+
+Text is variable-size type. 
+In ISO, it is 1 to 4 bytes per character.
+In UTF-8, it is 1 to 4 bytes per character.
+
+[Source](https://www.postgresql.org/docs/current/multibyte.html)
+
 
 ## How is a row stored ?
 
@@ -180,28 +206,159 @@ All in all, the storage looks like this
 
 ## Create many rows
 
-Add many rows: 10 million (last 40 seconds)
+Add many rows (last 4 seconds)
 ```postgresql
 INSERT INTO mytable (id)
 SELECT n
-FROM generate_series(1, 10000000) AS n;
+FROM generate_series(1, 10_000_000) AS n;
 ```
 
 Check what happened on disk
 ```shell
-du -sh base/16384/16401
+du -sh base/16384/16404
 ```
 
+You get
 ```text
-346M	base/16384/16401
+346M	base/16384/16404
 ```
 
 The data has been written to disk, 346 MB
 
-Check logs
-```text
-2025-07-29 08:37:16.187 UTC [27] LOG:  checkpoint starting: wal
+## Storage overhead 
+
+How much space is used for actual data ?
+What is the storage overhead ? We saw there is much overhead for an empty block.
+Now, what is this overhead for a whole table ?
+
+We have 10 millions rows, one integer for each row (4 bytes) 
+```postgresql
+SELECT 
+    pg_size_pretty(10_000_000 * 4::BIGINT)
 ```
+38 MB, much less than 346 MB
+
+If we check how many rows per block
+```postgresql
+SELECT
+    MAX((ctid::text::point)[1] )
+FROM mytable
+WHERE (ctid::text::point)[0] = 0
+```
+226
+
+What is the size of each row ? 
+```postgresql
+SELECT 
+    pg_size_pretty( 8 * 1024 / 226 ::BIGINT)     row_size_block,
+    4                                            data_size, 
+    pg_size_pretty( 8 * 1024 / 226 ::BIGINT - 4) row_overhead
+```
+36 bytes, whereas the only field is 4 bytes
+
+
+If we look at the doc, we find:
+- each block has 
+  - a header, 24 bytes
+  - an array of pointers, 4 bytes each
+  - free space, which does not exist here
+  - items (rows), for each
+    - a header, 23 bytes
+    - actual data
+
+Here, we have
+```postgresql
+SELECT 
+    24                      block_header,
+    4 * 226                 item_pointer,
+    (23 + 4)                item,
+    4 * 226                 items_no_header,
+    (23 + 4) * 226          items,
+    24 + 226 * (4 + 23 + 4) total,
+    8 * 1024                block
+```
+| block\_header | item\_pointer | item | items | total | block |
+|:--------------|:--------------|:-----|:------|:------|:------|
+| 24            | 904           | 27   | 6102  | 7030  | 8192  |
+
+This is a rough figure (there is some wasted space because of memory alignment).
+But we get the idea : in table with few column, metadata takes most of the space.
+
+How much data in table ?
+```postgresql
+SELECT TRUNC(904 / 8192 ::NUMERIC * 100) || ' %'
+```
+11 %
+
+[Source](https://www.postgresql.org/docs/current/storage-page-layout.html)
+
+
+If we create a table with
+- 1 integer - 4 bytes
+- 1 text, 10 characters UTF-8 - 10 bytes to 40 bytes
+- 1 timestamp - 4 bytes
+
+This is from 18 to 44 bytes per row
+
+```postgresql
+DROP TABLE IF EXISTS people ;
+
+CREATE TABLE people (
+    id  integer,
+    name text,
+    born_on timestamptz
+) WITH (AUTOVACUUM_ENABLED = FALSE);
+
+INSERT INTO people (id, name, born_on)
+SELECT n, repeat(left(n::text,1), 10), now() - n * INTERVAL '1 SECOND'::INTERVAL
+FROM generate_series(1, 300) AS n;
+
+SELECT *
+FROM people;
+
+ANALYZE VERBOSE people;
+
+SELECT relpages block_count
+FROM pg_class WHERE relname = 'people';
+```
+
+How many rows per block?
+```postgresql
+SELECT
+    MAX((ctid::text::point)[1] )
+FROM people
+WHERE (ctid::text::point)[0] = 0
+```
+157
+
+Here, with 25 bytes row, we have this
+```postgresql
+WITH row AS (
+  SELECT  
+    157 AS count,
+    25  AS size
+  )
+SELECT 
+    24                                   block_header,   
+    4 * row.count                        item_pointer,
+    (23 + row.size)                      item,
+    (23 + row.size) * row.count          items,
+    row.size * row.count                 items_no_header,
+    24 + row.count * (4 + 23 + row.size) total,
+    8 * 1024                             block
+FROM row
+```
+| block\_header | item\_pointer | item | items | items\_no\_header | total | block |
+|:--------------|:--------------|:-----|:------|:------------------|:------|:------|
+| 24            | 628           | 48   | 7536  | 3925              | 8188  | 8192  |
+
+
+How much data in table ?
+```postgresql
+SELECT TRUNC(3925 / 8192 ::NUMERIC * 100) || ' %'
+```
+47 %
+
 
 ## Get table size easily
 
@@ -235,8 +392,19 @@ How many blocks ?
 SELECT relpages block_count
 FROM pg_class WHERE relname = 'mytable';
 ```
+0
 
-44 248
+We should run 
+```postgresql
+ANALYZE VERBOSE mytable
+```
+
+How many blocks ?
+```postgresql
+SELECT relpages block_count
+FROM pg_class WHERE relname = 'mytable';
+```
+44248
 
 ## Access rows and get table usage 
 

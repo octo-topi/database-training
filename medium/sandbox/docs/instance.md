@@ -38,10 +38,16 @@ Get logs
 just logs
 ```
 
+Search in log for startup message.
+```text
+docker logs postgresql 2>&1 | grep ready
+```
+
 You should see the startup message.
 ```text
 2025-07-29 07:49:51.255 UTC [1] LOG:  database system is ready to accept connections
 ```
+
 
 Check CPU and memory allocation.
 ```shell

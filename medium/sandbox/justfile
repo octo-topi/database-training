@@ -21,7 +21,7 @@ shell:
     docker exec --interactive --tty --user=root postgresql bash
 
 storage:
-    docker exec --interactive --tty --user=root --workdir=/var/lib/postgresql/data postgresql bash
+    docker exec --interactive --tty --user=root --workdir="/var/lib/postgresql/$POSTGRESQL_IMAGE_VERSION/docker" postgresql bash
 
 # monitoring
 
