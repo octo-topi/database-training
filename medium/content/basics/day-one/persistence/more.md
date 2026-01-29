@@ -1,4 +1,160 @@
-## random access
+# More on storage
+
+## Storage overhead 
+
+How much space is used for actual data ?
+What is the storage overhead ? We saw there is much overhead for an empty block.
+Now, what is this overhead for a whole table ?
+
+```postgresql
+DROP TABLE IF EXISTS mytable ;
+
+CREATE TABLE mytable (
+    id  integer
+) WITH (AUTOVACUUM_ENABLED = FALSE);
+```
+
+Let's insert rows
+```postgresql
+INSERT INTO mytable (id)
+SELECT n
+FROM generate_series(1, 10_000_000) AS n;
+```
+
+We have 10 millions rows, one integer for each row (4 bytes) 
+```postgresql
+SELECT 
+    pg_size_pretty(10_000_000 * 4::BIGINT)
+```
+38 MB, much less than 346 MB
+
+If we check how many rows per block
+```postgresql
+SELECT
+    MAX((ctid::text::point)[1] )
+FROM mytable
+WHERE (ctid::text::point)[0] = 0
+```
+226
+
+What is the size of each row ? 
+```postgresql
+SELECT 
+    pg_size_pretty( 8 * 1024 / 226 ::BIGINT)     row_size_block,
+    4                                            data_size, 
+    pg_size_pretty( 8 * 1024 / 226 ::BIGINT - 4) row_overhead
+```
+36 bytes, whereas the only field is 4 bytes
+
+
+If we look at the doc, we find:
+- each block has 
+  - a header, 24 bytes
+  - an array of pointers, 4 bytes each
+  - free space, which does not exist here
+  - items (rows), for each
+    - a header, 23 bytes
+    - actual data
+
+Here, we have
+```postgresql
+SELECT 
+    24                      block_header,
+    4 * 226                 item_pointer,
+    (23 + 4)                item,
+    4 * 226                 items_no_header,
+    (23 + 4) * 226          items,
+    24 + 226 * (4 + 23 + 4) total,
+    8 * 1024                block
+```
+| block\_header | item\_pointer | item | items | total | block |
+|:--------------|:--------------|:-----|:------|:------|:------|
+| 24            | 904           | 27   | 6102  | 7030  | 8192  |
+
+This is a rough figure (there is some wasted space because of memory alignment).
+But we get the idea : in table with few column, metadata takes most of the space.
+
+How much data in table ?
+```postgresql
+SELECT TRUNC(904 / 8192 ::NUMERIC * 100) || ' %'
+```
+11 %
+
+[Source](https://www.postgresql.org/docs/current/storage-page-layout.html)
+
+
+If we create a table with
+- 1 integer - 4 bytes
+- 1 text, 10 characters UTF-8 - 10 bytes to 40 bytes
+- 1 timestamp - 4 bytes
+
+This is from 18 to 44 bytes per row
+
+```postgresql
+DROP TABLE IF EXISTS people ;
+
+CREATE TABLE people (
+    id  integer,
+    name text,
+    born_on timestamptz
+) WITH (AUTOVACUUM_ENABLED = FALSE);
+
+INSERT INTO people (id, name, born_on)
+SELECT n, repeat(left(n::text,1), 10), now() - n * INTERVAL '1 SECOND'::INTERVAL
+FROM generate_series(1, 300) AS n;
+
+SELECT *
+FROM people;
+
+ANALYZE VERBOSE people;
+
+SELECT relpages block_count
+FROM pg_class WHERE relname = 'people';
+```
+
+How many rows per block?
+```postgresql
+SELECT
+    MAX((ctid::text::point)[1] )
+FROM people
+WHERE (ctid::text::point)[0] = 0
+```
+157
+
+Here, with 25 bytes row, we have this
+```postgresql
+WITH row AS (
+  SELECT  
+    157 AS count,
+    25  AS size
+  )
+SELECT 
+    24                                   block_header,   
+    4 * row.count                        item_pointer,
+    (23 + row.size)                      item,
+    (23 + row.size) * row.count          items,
+    row.size * row.count                 items_no_header,
+    24 + row.count * (4 + 23 + row.size) total,
+    8 * 1024                             block
+FROM row
+```
+| block\_header | item\_pointer | item | items | items\_no\_header | total | block |
+|:--------------|:--------------|:-----|:------|:------------------|:------|:------|
+| 24            | 628           | 48   | 7536  | 3925              | 8188  | 8192  |
+
+
+How much data in table ?
+```postgresql
+SELECT TRUNC(3925 / 8192 ::NUMERIC * 100) || ' %'
+```
+47 %
+
+
+
+
+## random or sequential access
+
+### heap or index ?
 
 Heap allow sequential access, indexes allow indexed access.
 
@@ -27,7 +183,7 @@ Algorithmic complexity
 [index, random, sequential terminology](https://stackoverflow.com/questions/42598716/difference-between-indexed-based-random-access-and-sequential-access)
 
 
-## Is file contiguous ?
+### Is file contiguous of fs ?
 
 Find its physical location
 ```postgresql

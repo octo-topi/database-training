@@ -78,7 +78,6 @@ from [PostgreSQL doc](https://www.postgresql.org/docs/current/storage-toast.html
 Find its physical location
 ```postgresql
 SELECT pg_relation_filepath('mytable')
-FROM pg_settings WHERE name = 'data_directory';
 ```
 base/16384/16404
 
@@ -135,6 +134,14 @@ In ISO, it is 1 to 4 bytes per character.
 In UTF-8, it is 1 to 4 bytes per character.
 
 [Source](https://www.postgresql.org/docs/current/multibyte.html)
+
+You can also call a function on the actual data (useful on text) 
+```postgresql
+SELECT
+    pg_size_pretty(pg_column_size(123456)::BIGINT)       integer_size,
+    pg_size_pretty(pg_column_size(NOW())::BIGINT)        timestamp_size,
+    pg_size_pretty(pg_column_size('ABCDEFGHIJ')::BIGINT) text_size
+```
 
 
 ## How is a row stored ?
@@ -225,7 +232,13 @@ You get
 
 The data has been written to disk, 346 MB
 
-## Storage overhead 
+You can also query the filesystem here
+```postgresql
+SELECT pg_size_pretty(data_file.size::BIGINT)
+FROM pg_stat_file(pg_relation_filepath('mytable')) AS data_file 
+```
+346 MB
+
 
 How much space is used for actual data ?
 What is the storage overhead ? We saw there is much overhead for an empty block.
@@ -233,151 +246,48 @@ Now, what is this overhead for a whole table ?
 
 We have 10 millions rows, one integer for each row (4 bytes) 
 ```postgresql
+WITH data_file AS (
+    SELECT data_file.size AS size 
+    FROM pg_stat_file(pg_relation_filepath('mytable')) AS data_file
+)
 SELECT 
-    pg_size_pretty(10_000_000 * 4::BIGINT)
+    pg_size_pretty(10_000_000 * 4::BIGINT) data_size,
+    TRUNC((10_000_000 * 4) / data_file.size ::NUMERIC * 100) || ' %' pct,
+    pg_size_pretty(data_file.size)         table_size
+FROM data_file
 ```
-38 MB, much less than 346 MB
-
-If we check how many rows per block
-```postgresql
-SELECT
-    MAX((ctid::text::point)[1] )
-FROM mytable
-WHERE (ctid::text::point)[0] = 0
-```
-226
-
-What is the size of each row ? 
-```postgresql
-SELECT 
-    pg_size_pretty( 8 * 1024 / 226 ::BIGINT)     row_size_block,
-    4                                            data_size, 
-    pg_size_pretty( 8 * 1024 / 226 ::BIGINT - 4) row_overhead
-```
-36 bytes, whereas the only field is 4 bytes
+| data\_size | pct  | table\_size |
+|:-----------|:-----|:------------|
+| 38 MB      | 11 % | 346 MB      |
 
 
-If we look at the doc, we find:
-- each block has 
-  - a header, 24 bytes
-  - an array of pointers, 4 bytes each
-  - free space, which does not exist here
-  - items (rows), for each
-    - a header, 23 bytes
-    - actual data
-
-Here, we have
-```postgresql
-SELECT 
-    24                      block_header,
-    4 * 226                 item_pointer,
-    (23 + 4)                item,
-    4 * 226                 items_no_header,
-    (23 + 4) * 226          items,
-    24 + 226 * (4 + 23 + 4) total,
-    8 * 1024                block
-```
-| block\_header | item\_pointer | item | items | total | block |
-|:--------------|:--------------|:-----|:------|:------|:------|
-| 24            | 904           | 27   | 6102  | 7030  | 8192  |
-
-This is a rough figure (there is some wasted space because of memory alignment).
-But we get the idea : in table with few column, metadata takes most of the space.
-
-How much data in table ?
-```postgresql
-SELECT TRUNC(904 / 8192 ::NUMERIC * 100) || ' %'
-```
-11 %
-
-[Source](https://www.postgresql.org/docs/current/storage-page-layout.html)
-
-
-If we create a table with
-- 1 integer - 4 bytes
-- 1 text, 10 characters UTF-8 - 10 bytes to 40 bytes
-- 1 timestamp - 4 bytes
-
-This is from 18 to 44 bytes per row
-
-```postgresql
-DROP TABLE IF EXISTS people ;
-
-CREATE TABLE people (
-    id  integer,
-    name text,
-    born_on timestamptz
-) WITH (AUTOVACUUM_ENABLED = FALSE);
-
-INSERT INTO people (id, name, born_on)
-SELECT n, repeat(left(n::text,1), 10), now() - n * INTERVAL '1 SECOND'::INTERVAL
-FROM generate_series(1, 300) AS n;
-
-SELECT *
-FROM people;
-
-ANALYZE VERBOSE people;
-
-SELECT relpages block_count
-FROM pg_class WHERE relname = 'people';
-```
-
-How many rows per block?
-```postgresql
-SELECT
-    MAX((ctid::text::point)[1] )
-FROM people
-WHERE (ctid::text::point)[0] = 0
-```
-157
-
-Here, with 25 bytes row, we have this
-```postgresql
-WITH row AS (
-  SELECT  
-    157 AS count,
-    25  AS size
-  )
-SELECT 
-    24                                   block_header,   
-    4 * row.count                        item_pointer,
-    (23 + row.size)                      item,
-    (23 + row.size) * row.count          items,
-    row.size * row.count                 items_no_header,
-    24 + row.count * (4 + 23 + row.size) total,
-    8 * 1024                             block
-FROM row
-```
-| block\_header | item\_pointer | item | items | items\_no\_header | total | block |
-|:--------------|:--------------|:-----|:------|:------------------|:------|:------|
-| 24            | 628           | 48   | 7536  | 3925              | 8188  | 8192  |
-
-
-How much data in table ?
-```postgresql
-SELECT TRUNC(3925 / 8192 ::NUMERIC * 100) || ' %'
-```
-47 %
-
+The overhead is 89%.
 
 ## Get table size easily
 
-If we want to know the size without connecting to container fs, we call this function.
-```postgresql
-SELECT pg_table_size('mytable') table_size_bytes
-```
-362 586 112
+### Size on disk (bytes)
 
-Convert to size using `pg_size_pretty`
+If we want to know the size without looking into the datafile, we can call `pg_table_size` function.
 ```postgresql
-SELECT pg_size_pretty(pg_table_size('mytable'))  table_size
+SELECT 
+    pg_table_size('mytable')                  table_size_bytes,
+    pg_size_pretty(pg_table_size('mytable'))  table_size,
+    pg_size_pretty(pg_relation_size('mytable','main'))  table_size
 ```
 346 MB
 
-How many rows ?
+```postgresql
+select *
+from pg_catalog.pg_statio_user_tables
+order by pg_relation_size(relid) desc;
+```
+
+### Size on disk (rows)
+
+How many rows ? Check `pg_stat_user_tables`
 ```postgresql
 SELECT
-   stt.relname                        table_name
+    stt.relname                        table_name
    ,stt.n_live_tup                    row_count
 FROM pg_stat_user_tables stt
 WHERE 1=1
@@ -385,26 +295,56 @@ WHERE 1=1
 ;
 ```
 
+All `pg_stat*` views belong to PostgreSQL's cumulative statistics system.
+These statistics are collected by the processes themselves, so they are roughly "up-to-date".
+> a query or transaction still in progress does not affect the displayed totals and the displayed information lags behind actual activity
+> accessed values are cached until the end of its current transaction
+[Reference](https://www.postgresql.org/docs/current/monitoring-stats.html)
+
 [More size statistics](https://www.postgresql.org/docs/current/functions-admin.html#FUNCTIONS-ADMIN-DBSIZE)
 
-How many blocks ?
+### Size on disk (blocks)
+
+How many blocks ? Check `pg_class`
 ```postgresql
-SELECT relpages block_count
+SELECT 
+    relpages  block_count,
+    reltuples row_count
 FROM pg_class WHERE relname = 'mytable';
 ```
-0
 
-We should run 
+You get
+
+| block\_count | row\_count |
+|:-------------|:-----------|
+| 0            | -1         |
+
+
+`pg_class` is not in PostgreSQL's cumulative statistics system, so it is not updated automatically.
+
+The documentation make it explicit 
+
+> This is only an estimate used by the planner. It is updated by VACUUM, ANALYZE, and a few DDL commands such as CREATE INDEX.
+[Reference](https://www.postgresql.org/docs/current/catalog-pg-class.html)
+
+We should do run ANALYZE; here we do it on the table only. 
 ```postgresql
 ANALYZE VERBOSE mytable
 ```
 
 How many blocks ?
 ```postgresql
-SELECT relpages block_count
+SELECT 
+    relpages  block_count,
+    reltuples row_count
 FROM pg_class WHERE relname = 'mytable';
 ```
-44248
+
+You get
+| block\_count | row\_count |
+|:-------------|:-----------|
+| 44248        | 10000048   |
+
 
 ## Access rows and get table usage 
 
