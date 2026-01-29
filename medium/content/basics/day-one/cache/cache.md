@@ -409,7 +409,7 @@ As no table which is bigger than 25% of the cache can be loaded completely, it i
 | yourtable | 1          | 443   |
 
 
-## Writing 
+## Modifying data 
 
 What happens if we modify a row, that is, we create a new version ?
 
@@ -464,10 +464,11 @@ GROUP BY
     c.relname
 ```
 
-We must make sure this block find its way to disk, sooner or later.
+We must make sure this block find its way to disk, sooner or later, or we may lose data.
 
+## Writing to disk : checkpointer
 
-## Force writing dirty buffers to disk
+### Manually
 
 We can force writing the block to disk.
 ```postgresql
@@ -490,15 +491,37 @@ GROUP BY
     c.relname
 ```
 
-## Checkpointer
+### Automatically
 
-COMMIT should do two things:
-- write WAL buffers into WAL files
-- write dirty buffers into data files
+#### Periodically
+This should be done automatically.
 
-The checkpointer take care of WAL file.
+It is done by a background job, called background writer.
+```shell
+just shell
+ps -fU postgres
+```
 
-Statistics
+It is pid `148716`
+```
+postgres       1       0  0 09:30 ?        00:00:13 postgres -c config_file=/etc/postgresql/postgresql.conf
+postgres  148711       1  0 14:57 ?        00:00:00 postgres: io worker 0
+postgres  148712       1  0 14:57 ?        00:00:00 postgres: io worker 1
+postgres  148713       1  0 14:57 ?        00:00:00 postgres: io worker 2
+postgres  148715       1  0 14:57 ?        00:00:00 postgres: checkpointer 
+postgres  148716       1  0 14:57 ?        00:00:00 postgres: background writer 
+postgres  148731       1  0 14:57 ?        00:00:00 postgres: walwriter 
+postgres  148732       1  0 14:57 ?        00:00:00 postgres: autovacuum launcher 
+postgres  148733       1  0 14:57 ?        00:00:00 postgres: logical replication launcher 
+postgres  150486       1  0 15:01 ?        00:00:00 postgres: user database 172.18.0.1(52530) idle
+```
+
+It is launched, and is configurable, in two ways:
+- periodically;
+- punctually, if much data update activity is going on in the system.
+
+
+You can get its statistics.
 ```postgresql
 SELECT 
     'checkpoint=>'
@@ -514,12 +537,16 @@ FROM
 
 [Source](https://www.postgresql.org/docs/current/monitoring-stats.html#MONITORING-PG-STAT-CHECKPOINTER-VIEW)
 
-Reset
+You can reset them.
 ```postgresql
 SELECT pg_stat_reset_shared('checkpointer')
 ```
 
-WAL is disabled in this database, but we can trigger a checkpoint manually. 
+#### If much activity
+
+The checkpointer is disabled in this database for educative purpose, see [postgresql.conf](../../../../sandbox/configuration/postgresql.conf), section `Checkpointer`.
+
+Still, we can trigger a checkpoint manually. 
 ```postgresql
 CHECKPOINT; 
 ```
@@ -529,36 +556,95 @@ Check logs
 LOG: checkpoint starting: immediate force wait
 ```
 
-In case WAL files > max_wal_size, you get 
-```text
-LOG : checkpoint starting: wal
-```
+If there is much update activity, the checkpointer will be triggered.
 
-```terminal
-just storage
-du -h /var/lib/postgresql/data/pg_wal
-4.0G	/var/lib/postgresql/data/pg_wal
-```
+Such activity is related to WAL: if all WAL files size exceeds `max_wal_size`, a checkpoint is executed.
 
-
-## Backend client writes
+Let's do this.
 
 ```postgresql
-DROP TABLE IF EXISTS mytable1 ;
+CHECKPOINT 
+```
 
-CREATE TABLE mytable1 (
+Reset stats
+```postgresql
+SELECT pg_stat_reset_shared('checkpointer')
+```
+
+```postgresql
+SELECT 
+    'checkpoint=>'
+    ,cp.num_requested   manual_count
+    ,cp.num_timed       automatic_count
+    ,cp.buffers_written block_count
+    ,pg_size_pretty(cp.buffers_written * 8 * 1024) size
+FROM
+    pg_stat_checkpointer cp
+```
+
+| ?column?       | manual\_count | automatic\_count | block\_count | size    |
+|:---------------|:--------------|:-----------------|:-------------|:--------|
+| checkpoint=>   | 0             | 0                | 0            | 0 bytes |
+
+
+Then insert more than 4 GB (1 minute)
+```postgresql
+DROP TABLE IF EXISTS mytable;
+
+CREATE TABLE mytable (
     id  integer
 ) WITH (AUTOVACUUM_ENABLED = FALSE);
 
-EXPLAIN (ANALYZE, BUFFERS)
-INSERT INTO mytable1 (id)
+INSERT INTO mytable (id)
 SELECT n
-FROM generate_series(1, 10000000) AS n;
+FROM generate_series(1, 50_000_000) AS n;
 ```
 
+Check log
+```shell
+docker logs postgresql 2>&1 | grep checkpoint
+```
 
-## Background writer
+You got `checkpoint starting: wal`
+```postgresql
+2026-01-29 15:51:15.259 GMT [148715] LOG:  checkpoint starting: wal
+```
 
+The table 
+```postgresql
+SELECT    pg_size_pretty(pg_table_size('mytable'))  table_size
+```
+1729 MB
+
+
+Check WAL size
+```shell
+just storage
+/var/lib/postgresql/18/docker/pg_wal
+4.0G	/var/lib/postgresql/data/pg_wal
+```
+
+Check stats
+```postgresql
+SELECT 
+    'checkpoint=>'
+    ,cp.num_requested   manual_count
+    ,cp.num_timed       automatic_count
+    ,cp.buffers_written block_count
+    ,pg_size_pretty(cp.buffers_written * 8 * 1024) size
+FROM
+    pg_stat_checkpointer cp
+```
+| ?column?        | manual\_count | automatic\_count | block\_count | size  |
+|:----------------|:--------------|:-----------------|:-------------|:------|
+| checkpoint=&gt; | 1             | 0                | 11           | 88 kB |
+
+
+## Writing to disk in the background : Background writer
+
+The background writer does the same job as teh checkpointer, but in much smaller batches.
+
+It is also disabled in this database for educative purpose, see [postgresql.conf](../../../../sandbox/configuration/postgresql.conf), section `Background writer`.
 ```postgresql
 -- Execution frequency
 SHOW bgwriter_delay; 
@@ -567,8 +653,7 @@ SHOW bgwriter_delay;
 SHOW bgwriter_lru_maxpages; 
 ```
 
-
-Background writer statistics (all tables)
+It has its own statistics
 ```postgresql
 SELECT 
      bgw.buffers_clean   blocks_written
@@ -586,85 +671,156 @@ Reset
 SELECT pg_stat_reset_shared('bgwriter')
 ```
 
-## I/O statistics
+## Writing to disk in emergency : Backend client
 
+If the background writer and the checkpointer cannot handle the situation, we still didn't want to block queries.
+If a query need a block, which is not in the cache, a cache block should be evicted.
+If all blocks in the cache are dirty, we cannot evict them: we need to write some to disk.   
 
-
-
-You can find overall statistics about who read and write to disk, but WAL statistics before v18.
-
-Context:
-- `bulkread` and `bulkwrite` relate to buffer-ring use
-- `normal` relate to shared buffers use
-
+Let's provoke it
 ```postgresql
-SELECT DISTINCT backend_type FROM pg_stat_io
-ORDER BY 1
+DROP TABLE IF EXISTS mytable ;
+DROP TABLE IF EXISTS mytable1 ;
+DROP TABLE IF EXISTS mytable2 ;
+
+CREATE TABLE mytable1 (
+    id  integer
+) WITH (AUTOVACUUM_ENABLED = FALSE);
+  
+CREATE TABLE mytable2 (
+    id  integer
+) WITH (AUTOVACUUM_ENABLED = FALSE);
+
+INSERT INTO mytable2 (id)
+SELECT n
+FROM generate_series(1, 1_000_000) AS n;
+
+CHECKPOINT;
 ```
 
+Evict
+```postgresql
+SELECT
+    pg_buffercache_evict(b.bufferid)
+FROM pg_class c
+         INNER JOIN pg_buffercache b ON b.relfilenode = c.relfilenode
+         INNER JOIN pg_database d  ON (b.reldatabase = d.oid AND d.datname = current_database())
+WHERE 1=1
+--    AND c.relname NOT LIKE 'pg_%'
+  AND c.relname = 'mytable2';
+```
 
+Check
+```postgresql
+SELECT
+    c.relname,
+    b.isdirty,
+    COUNT(*) blocks,
+    pg_size_pretty(COUNT(*) * 8 * 1024) dirty_size
+FROM pg_class c
+         INNER JOIN pg_buffercache b ON b.relfilenode = c.relfilenode
+         INNER JOIN pg_database d ON (b.reldatabase = d.oid AND d.datname = current_database())
+WHERE 1=1
+      AND c.relname NOT LIKE 'pg_%'    
+    --AND b.isdirty IS TRUE
+GROUP BY 
+    b.isdirty, 
+    c.relname
+```
+
+Now fill up the cache with dirty buffers
+```postgresql
+INSERT INTO mytable1 (id)
+SELECT n
+FROM generate_series(1, 10_000_000) AS n;
+```
+
+Check
+```postgresql
+SELECT
+    c.relname,
+    b.isdirty,
+    COUNT(*) blocks,
+    pg_size_pretty(COUNT(*) * 8 * 1024) size
+FROM pg_class c
+         INNER JOIN pg_buffercache b ON b.relfilenode = c.relfilenode
+         INNER JOIN pg_database d ON (b.reldatabase = d.oid AND d.datname = current_database())
+WHERE 1=1
+      AND c.relname NOT LIKE 'pg_%'    
+    --AND b.isdirty IS TRUE
+GROUP BY 
+    b.isdirty, 
+    c.relname
+```
+| relname  | isdirty | blocks | size   |
+|:---------|:--------|:-------|:-------|
+| mytable1 | false   | 5      | 40 kB  |
+| mytable1 | true    | 15922  | 124 MB |
+
+124 MB dirty buffers on mytable1
+
+
+Reset stats
+```postgresql
+SELECT pg_stat_reset_shared('io')
+```
+
+And now read another table
+```postgresql
+SELECT SUM(id) FROM mytable2
+```
+
+Check
+```postgresql
+SELECT
+    c.relname,
+    b.isdirty,
+    COUNT(*) blocks,
+    pg_size_pretty(COUNT(*) * 8 * 1024) dirty_size
+FROM pg_class c
+         INNER JOIN pg_buffercache b ON b.relfilenode = c.relfilenode
+         INNER JOIN pg_database d ON (b.reldatabase = d.oid AND d.datname = current_database())
+WHERE 1=1
+      AND c.relname NOT LIKE 'pg_%'    
+    --AND b.isdirty IS TRUE
+GROUP BY 
+    b.isdirty, 
+    c.relname
+```
+
+| relname  | isdirty | blocks | dirty\_size |
+|:---------|:--------|:-------|:------------|
+| mytable1 | false   | 5      | 40 kB       |
+| mytable1 | true    | 12606  | 98 MB       |
+| mytable2 | true    | 3353   | 26 MB       |
+
+124 MB to 98 Mb dirty buffers on mytable1: 26 Mb data has been written
+```postgresql
+SELECT 124 - 98
+```
+
+Then query
 ```postgresql
 SELECT 'I/O=>' _
      , io.backend_type
      , io.object
      , io.context
-     , 'read:' _
-     , io.reads          blocks
-     , pg_size_pretty(io.read_bytes)  size
-     , io.read_time      elapsed
      , 'w=>OS' _ -- write PG cache => OS cache
      , io.writes         blocks
      , pg_size_pretty(io.write_bytes)  size
      , io.write_time     elapsed
-     , 'w=>disk' _ -- write OS cache => disk
-     , io.writebacks     block
-     , io.writeback_time elapsed
-     --, 'pg_stat_io'
-     --, io.*
 FROM pg_stat_io io
 WHERE 1 = 1
-  --AND (io.reads > 0 OR io.writes > 0)
---   AND io.backend_type IN (
---                           'checkpointer'
---                           ,'background writer'
---                           ,'client backend'
---     )
+  AND (io.reads > 0 OR io.writes > 0)
+  AND io.backend_type = 'client backend'
 ORDER BY io.writes DESC
 ```
-[Source](https://www.postgresql.org/docs/current/monitoring-stats.html#MONITORING-PG-STAT-IO-VIEW)
+
+| \_       | backend\_type  | object   | context  | \_       | blocks | size   | elapsed |
+|:---------|:---------------|:---------|:---------|:---------|:-------|:-------|:--------|
+| I/O=&gt; | client backend | relation | bulkread | w=&gt;OS | 4423   | 35 MB  | 10.725  |
+| I/O=&gt; | client backend | relation | normal   | w=&gt;OS | 11     | 88 kB  | 0.1     |
+| I/O=&gt; | client backend | wal      | normal   | w=&gt;OS | 1      | 160 kB | 0.084   |
 
 
-[Source](https://www.cybertec-postgresql.com/en/pg_stat_io-postgresql-16-performance/)
-
-
-Cache hit, cache eviction, datafile grows
-```postgresql
-SELECT
-    'I/O=>'
-    ,io.backend_type
-    ,io.object
-    ,io.context
-    ,''
-    ,io.evictions
-    ,io.hits
-    ,io.extends
-    ,'pg_stat_io'
-    ,io.*
-FROM
- pg_stat_io io
-WHERE 1=1
-    AND io.backend_type = 'client backend'
---    AND io.backend_type IN ('checkpointer', 'background writer', 'client backend')
-    --AND extends > 0
-```
-
-You can reset all stats 
-```postgresql
-SELECT pg_stat_reset_shared()
-```
-
-Or reset only I/O
-```postgresql
-SELECT pg_stat_reset_shared('io')
-```
-
+35 Mb have been written by the backend.
