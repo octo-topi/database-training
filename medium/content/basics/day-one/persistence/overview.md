@@ -1,19 +1,32 @@
 # Overview
 
+Everything is done so writing :
+- is fast;
+- can handle huge amount of data;
+- without wasting disk space.
+
 ## Storage
+
 PostgreSQL use heap storage and row storage.
 Each table is stored in a single file, and the row is stored contiguously in this file.
-The file is a collection of 8Kb records, named blocks. If the file should grow, it will grow block by block. 
+
+The file is a collection of 8Kb records, named blocks. If the file should grow, it will grow block by block.
+
 Heap is optimized for writing, as it does not sort data. 
 It is not optimized for searching, as access is sequential.
 
+To accommodate for variable-length data type like text :
+- PostgreSQL store only the content of the row data (no padding);
+- rows are accessed in a block using pointer, which are stored at the start of the block;
+- this indirect addressing expose an identifier called `ctid`, its value is `( $BLOCK_NUMBER : $ITEM_NUMBER)`.
+
 ## Reuse
+
 When rows are deleted, PostgreSQL does not give back the space to the operating system.
 It will reuse it for future insertions. But to do so, a maintenance operation should be run, named `VACUUM`.
 It can be performed manually or automatically. 
 There are default settings, which you can change if the automatic operation is triggered too often or too few.
 If you actually want to give back this space to OS, use `VACUUM FULL` or `TRUNCATE TABLE` if you don't need any rows.
-
 
 ## Statistics
 
@@ -36,7 +49,7 @@ Free space is not accessible through any views, so you can:
 
 Block, page
 
-Row, tuple
+Row, tuple, item
 
 Bloat
 

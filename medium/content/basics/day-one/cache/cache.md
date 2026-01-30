@@ -813,6 +813,7 @@ FROM pg_stat_io io
 WHERE 1 = 1
   AND (io.reads > 0 OR io.writes > 0)
   AND io.backend_type = 'client backend'
+
 ORDER BY io.writes DESC
 ```
 

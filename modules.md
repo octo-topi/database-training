@@ -197,6 +197,8 @@ Practice:
 - track ring buffer usage
 
 
+##### WAL
+
 #### Observability
 
 Server metrics:

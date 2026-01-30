@@ -146,6 +146,8 @@ SELECT
 
 ## How is a row stored ?
 
+### Row-storage, variable length fields
+
 PostgreSQL allocate space in filesystem in chunks to improve performance :
 - several rows will be written;
 - allocate space (writing a file) require a system call which is expensive.
@@ -163,28 +165,33 @@ Note:
 - fixed-size field may be stored [using more space than needed](https://www.cybertec-postgresql.com/en/type-alignment-padding-bytes-no-space-waste-in-postgresql/) : 
 - NULL values does not store any content.
 
-To be able to access variable-length rows quickly, in an indexed way, we should use pointers.
+To be able to access variable-length rows quickly, without reading all the block and looking for special marker (like end-of-row), we should use pointers.
 
-To save more space, as we can't know how many rows will be stored:
-- pointer are stored at block's start;
-- rows are stored at block's end.
+The pointer will store :
+- the row start address in the block (offset);
+- the row length.
 
-PostgreSQL need to access row quickly internally (e.g. for indexes) and can't use the row primary key (it may not exist).
-So it use an internal identifier, which relate to the physical address. 
+These pointers can be seen as block-scoped indexes.
 
-But to save even more space, we may need to move row in the block without updating this internal identifier.
-
-How can we do that ? We recall the fundamental theorem of software engineering
-> We can solve any problem by introducing an extra level of indirection
-
-We'll use a pointer to pointer :
-- row addresses are hidden;
-- block pointer expose an identifier called Current Tuple IDentifier (CTID);
-- its syntax is `(block_number, row_number)` e.g. `(0, 1)`.
+Pointer are stored at block's start, rows are stored at block's end.
 
 
 ![Block layout.png](block-layout.png)
 
+### Avoid fragmentation
+
+In the block, existing rows will be modified or deleted. New rows wil be inserted.
+How can we avoid fragmentation in the block ? 
+
+Think about the fundamental theorem of software engineering
+> We can solve any problem by introducing an extra level of indirection
+
+We won't store in the pointer array only the offset and length of rows.
+
+We'll use a pointer to pointer :
+- row addresses (offset) are hidden;
+- block pointer expose an identifier called Current Tuple IDentifier (CTID);
+- its syntax is `(block_number, row_number)` e.g. `(0, 1)`.
 
 You can query using the pointer
 ```postgresql
@@ -193,8 +200,27 @@ FROM mytable
 WHERE 1=1
     AND id = -1
     AND ctid = '(0,1)'
-```          
+```
 
+You can access pointer fields
+```postgresql
+SELECT
+    id, 
+    ctid,
+    (ctid::text::point)[0] block_id,
+    (ctid::text::point)[1] item_id
+FROM mytable
+```
+
+All in all, the storage looks like this
+![Storage overview](storage-overview.png)
+
+### More
+
+There is a lot to say about storage, for example about big rows.
+If rows are so big PostgreSQL cannot fit 4 rows in a block, it will store data out of the table, in a TOAST table.
+
+As for now, just remember this extract of [PostgreSQL docs](https://www.postgresql.org/docs/current/storage-page-layout.html#STORAGE-TUPLE-LAYOUT)
 > Every table is stored as an array of blocks.
 > All the blocks are logically equivalent, so a particular item (row) can be stored in any blocks.
 > The first 24 bytes of each page consists of a block header.
@@ -202,14 +228,9 @@ WHERE 1=1
 > Because an item identifier is never moved until it is freed, its index can be used on a long-term basis to reference an item.
 > Every pointer to an item created by PostgreSQL consists of a page number and the index of an item identifier.
 
-[PostgreSQL docs](https://www.postgresql.org/docs/current/storage-page-layout.html#STORAGE-TUPLE-LAYOUT)
-
-
-All in all, the storage looks like this
-![Storage overview](storage-overview.png)
-
-
-[More](https://www.interdb.jp/pg/pgsql01/03.html)
+If you want to know more, check:
+- [Hironobu SUZUKI](https://www.interdb.jp/pg/pgsql01/03.html)
+- PostgreSQL Internals, Part I - Isolation and MVCC - Pages and Tuples / Page structure
 
 ## Create many rows
 
