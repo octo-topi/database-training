@@ -1,4 +1,16 @@
-# Filtering
+# Explain
+
+## Input
+
+What does execution should take into account ?
+- data statistics (row expected, Rows Removed by Filter)
+- cache (hit, dirtied, read)
+- wal (wal)
+- mvcc (all_visible => heap fetches=0)
+- index (Recheck Cond)
+
+
+
 
 ## Data statistics
 

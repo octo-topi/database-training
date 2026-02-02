@@ -23,4 +23,4 @@ In PostgreSQL
 - reader don't block writer
 
 
-## List locks
+https://blog.octo.com/7-things-a-developer-should-know-about-databases
