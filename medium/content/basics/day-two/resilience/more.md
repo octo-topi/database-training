@@ -2,7 +2,8 @@
 
 ## WAL in a nutshell
 
-Using write-ahead log, you write in WAL **ahead** of writing in data files.
+Using write-ahead log, you write in WAL **ahead** of writing in data files. It's a permanent-storage deferred write.
+That means datafile are inconsistent most of the time, only the shared buffer (cache) is consistent. 
 
 You trade space for speed :
 - data is written in several places, it is redundant, so it takes more space;
@@ -15,6 +16,8 @@ Any way, you do not compromise integrity.
 WAL files are :
 - short-lived
 - write once, never read
+- written in a sequential manner
+- written synchronously
 - reusable
 - low volume
 
@@ -23,6 +26,8 @@ It's appropriate to put them on a quick, small filesystem.
 Data files are :
 - long-lived
 - written and read many times
+- written in a random manner
+- written asynchronously
 - not reusable
 - high volume
 
