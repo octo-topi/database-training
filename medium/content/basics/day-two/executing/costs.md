@@ -41,6 +41,12 @@ SHOW cpu_tuple_cost
 
 Let's create a table.
 ```postgresql
+DROP TABLE IF EXISTS mytable ;
+
+CREATE TABLE mytable (
+    id  integer
+) WITH (autovacuum_enabled = FALSE);
+
 TRUNCATE mytable;
 
 INSERT INTO mytable (id)
@@ -148,7 +154,7 @@ SELECT * FROM mytable
 
 What is the cost for scan and filter ?
 ```postgresql
-EXPLAIN 
+EXPLAIN ANALYZE
 SELECT * FROM mytable
 WHERE id = 2
 ```
@@ -194,7 +200,7 @@ FROM read_block r, decode_block d, filter_rows f
 The costs match.
 
 
-## Table random access
+## Table direct access
 
 What is the estimated cost ? 
 ```postgresql
@@ -203,6 +209,8 @@ SELECT * FROM mytable WHERE ctid = '(0,1)'
 ```
 
 ## Table random access
+
+You can only get it using an index.
 
 What is the estimated cost ? 
 ```postgresql
@@ -215,7 +223,7 @@ SELECT * FROM mytable WHERE ctid = '(0,1)'
 
 > Although the system will let you set random_page_cost to less than seq_page_cost, it is not physically sensible to do so. However, setting them equal makes sense if the database is entirely cached in RAM, since in that case there is no penalty for touching pages out of sequence. Also, in a heavily-cached database you should lower both values relative to the CPU parameters, since the cost of fetching a page already in RAM is much smaller than it would normally be.
 
-https://www.postgresql.org/docs/current/runtime-config-query.html
+[Reference](https://www.postgresql.org/docs/current/runtime-config-query.html)
 
 ## More
 
