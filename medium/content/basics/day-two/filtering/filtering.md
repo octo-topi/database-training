@@ -1,6 +1,6 @@
 # Filtering - Table data statistics
 
-## Rows
+## No filter
 
 Let's create a single-row table
 ```postgresql
@@ -13,17 +13,17 @@ CREATE TABLE mytable (
 INSERT INTO mytable (id) VALUES (-1);
 ```
 
-Suppose we want to query the table, how many rows will it return ?
+Suppose we want to query the table, as is.
+How can we know many rows will it return, without running the query ?
 ```text
 SELECT id 
 FROM mytable
 ```
 
-How many rows ? Check `pg_stat_user_tables`
+We can use `pg_stat_user_tables`
 ```postgresql
 SELECT
-    stt.relname                        table_name
-   ,stt.n_live_tup                    row_count
+   stt.n_live_tup row_count
 FROM pg_stat_user_tables stt
 WHERE 1=1
    AND relname = 'mytable'
@@ -31,26 +31,81 @@ WHERE 1=1
 ```
 1
 
+This figure, 1 row, is called the table `cardinality`.
+
+What if we delete it ?
+```postgresql
+DELETE FROM mytable
+WHERE id =-1
+```
+
+We still have the right figure
+```postgresql
+SELECT
+   stt.n_live_tup row_count
+FROM pg_stat_user_tables stt
+WHERE 1=1
+   AND relname = 'mytable'
+;
+```
+0
+
+Is there other table that store tuple count ?
+```postgresql
+SELECT
+     'column'
+     ,c.table_name
+     ,c.column_name
+FROM
+     information_schema.columns c
+WHERE 1=1
+    AND c.table_schema = 'pg_catalog'
+    AND c.column_name ILIKE '%tup%'
+ORDER BY
+    c.table_name, c.column_name ASC
+;
+```
+
+Yes, `p_class`. Let's query it.
+```postgresql
+SELECT
+    reltuples
+FROM pg_class 
+WHERE 1=1
+   AND relname = 'mytable'
+;
+```
+-1
+
+Look like it is not up-to-date ...
+
+
 ## Basic filter
 
-Now, if we query the table with a predicate ( = a filter)
+Now, if we query the table with a filter
+How can we know how many rows it will return without running the query ?
 ```postgresql
 SELECT id 
 FROM mytable
 WHERE id=1
 ```
 
-How many rows will we get ? We may know no rows will be returned, because we inserted it.
-But how can PostgreSQL know it ?
+We know no rows will be returned, because we inserted no rows for id=1.
+We need insight into the data, without recording everything that happened to the table. 
+How can PostgreSQL do that ? It will compute statistics on the table from time to time. 
 
-It uses `pg_statistic` table
+Let's query  `pg_statistic` table.
 ```postgresql
 SELECT * FROM pg_statistic s
 WHERE s.starelid = 'mytable'::regclass
 ```
 [Reference](https://www.postgresql.org/docs/current/catalog-pg-statistic.html)
 
-Because getting statistics involve some sampling, which is costly, it is done:
+Look like there are no statistics.
+
+Getting statistics involve some sampling, visiting some of the table's rows.
+
+This is costly, it is done:
 - automatically, part of [auto-vacuuming](https://www.postgresql.org/docs/17/runtime-config-autovacuum.html);
 - manually by issuing `ANALYZE`.
 
@@ -58,17 +113,17 @@ Because getting statistics involve some sampling, which is costly, it is done:
 ANALYZE VERBOSE mytable
 ```
 
-You get an output which show you how many resources you use
+You get an output which remind you how many resources you use.
 ```text
 analyzing "public.mytable"
-"mytable": scanned 1 of 1 pages, containing 1 live rows and 0 dead rows; 1 rows in sample, 1 estimated total rows
+"mytable": scanned 1 of 1 pages, containing 0 live rows and 1 dead rows; 0 rows in sample, 0 estimated total rows
 finished analyzing table "database.public.mytable"
-I/O timings: read: 0.660 ms, write: 0.000 ms
-avg read rate: 15.625 MB/s, avg write rate: 11.719 MB/s
-buffer usage: 23 hits, 4 reads, 3 dirtied
+I/O timings: read: 0.000 ms, write: 0.000 ms
+avg read rate: 0.000 MB/s, avg write rate: 0.000 MB/s
+buffer usage: 5 hits, 0 reads, 0 dirtied
 ```
 
-The last analyze is available
+The last analyze time is available in `pg_stat_user_tables`.
 ```postgresql
 SELECT last_analyze, last_autoanalyze
 FROM pg_stat_user_tables t 
@@ -80,13 +135,22 @@ WHERE t.relname = 'mytable'
 | 2026-02-02 14:25:08.567033 +00:00 | null              |
 
 
-Statistics are now available
+Statistics are now available.
 ```postgresql
 SELECT * FROM pg_statistic s
 WHERE s.starelid = 'mytable'::regclass
 ```
 
-Which are easier to read using this view
+Look like there is no statistics if the table has no live tuples.
+Let's add some.
+```postgresql
+INSERT INTO mytable (id) VALUES (-1);
+ANALYZE VERBOSE mytable;
+SELECT * FROM pg_statistic s
+WHERE s.starelid = 'mytable'::regclass;
+```
+
+They are easier to read using this view.
 ```postgresql
 SELECT
     s.*
@@ -96,9 +160,9 @@ WHERE 1=1
     AND s.attname = 'id'
 ```
 
-But most figures are not set.
+Most figures are not set.
 
-Let's add many rows with the same value
+Let's add many rows - with the same value.
 ```postgresql
 INSERT INTO mytable (id)
 SELECT 1
@@ -107,7 +171,7 @@ FROM generate_series(1, 10_000_000) AS n;
 ANALYZE mytable;
 ```
 
-Now query the stats
+Now query the stats.
 ```postgresql
 SELECT
      s.avg_width         size_bytes
@@ -115,6 +179,7 @@ SELECT
     ,s.most_common_vals  most_common_values_count
     ,s.most_common_freqs most_common_values_frequency
      ,TRUNC(s.null_frac * 100) || '%'  null_ratio 
+    --,s.*
 FROM pg_stats s
 WHERE 1=1
     AND s.tablename = 'mytable'
@@ -129,9 +194,8 @@ WHERE 1=1
 If we check [the docs](https://www.postgresql.org/docs/current/view-pg-stats.html), we can see :
 - the average attribute size is 4 bytes ;
 - there is one distinct value;
-- all rows have the value `1` (`most_common_value_frequency=1`);
+- the frequency of value `1` is 1 ( `most_common_value_frequency=1` = all rows have the value `1` );
 - there is no `NULL` value (`null_frac=0`).
-
 
 So if we run this query, we know we will get all table's rows.
 ```postgresql
@@ -140,9 +204,38 @@ FROM mytable
 WHERE id=1
 ```
 
-## Histograms
+We will get that many rows.
+```postgresql
+SELECT
+    c.reltuples * s.most_common_freqs[1] row_count
+FROM pg_class c
+    JOIN pg_stats s ON s.tablename = c.relname
+WHERE 1=1
+    AND c.relname = 'mytable'
+```
+10 000 047
 
-Let's insert rows with distinct values to get
+The count is off by 47 rows, this is perfectly acceptable. 
+
+
+In this query, `id = 1` is called a predicate
+```postgresql
+SELECT id 
+FROM mytable
+WHERE id=1
+```
+
+The ratio of rows that are kept after the filter is called the `selectivity`.
+```postgresql
+SELECT 
+    ((SELECT COUNT(*) FROM mytable WHERE id=1)::DECIMAL / (SELECT COUNT(*) FROM mytable)::DECIMAL) selectivity
+```
+
+The selectivity is all about the data: here, teh frequency of the selected value, 1, is the selectivity. 
+
+## What about NULL ?
+
+Let's insert rows with more interesting repartition, including NULL: 
 - 10 % 1
 - 40 % 2
 - 50 % NULL
@@ -193,13 +286,161 @@ We've got 2 distinct values:
 
 NULL (which is not a value) makes for `50%` of the rows.
 
-
-So if we run this query, we know we will 40% of table rows.
+If we run this query, we know we will 40% of table rows.
 ```postgresql
 SELECT id 
 FROM mytable
 WHERE id=2
 ```
+
+That is:
+```postgresql
+SELECT
+    TRUNC(c.reltuples * s.most_common_freqs[1]) row_count
+FROM pg_class c
+    JOIN pg_stats s ON s.tablename = c.relname
+WHERE 1=1
+    AND c.relname = 'mytable'
+```
+401 566
+
+If we run this query, we will have about 50% of table rows.
+```postgresql
+SELECT id 
+FROM mytable
+WHERE id IS NULL
+```
+
+That is:
+```postgresql
+SELECT
+    TRUNC(c.reltuples * s.null_frac) row_count
+FROM pg_class c
+    JOIN pg_stats s ON s.tablename = c.relname
+WHERE 1=1
+    AND c.relname = 'mytable'
+```
+496 466
+
+
+## Histograms
+
+The type of statistics we saw, stored in `most_common_value` and `most_common_freqs`, is called MCV for "Most Common Value".
+It is useful where there is a few distinct values. What if values are so different they are unique ?
+
+We still what to know how many rows will match.
+```postgresql
+SELECT id 
+FROM mytable
+WHERE id = 50
+```
+
+Let's insert a million single values.
+```postgresql
+TRUNCATE mytable;
+
+INSERT INTO mytable (id)
+SELECT n
+FROM generate_series(1, 1_000_000) AS n;
+
+ANALYZE VERBOSE mytable;
+
+SELECT COUNT(*) FROM mytable;
+SELECT * FROM mytable;
+```
+
+Let's see
+```postgresql
+SELECT
+     s.avg_width         size_bytes
+    ,s.n_distinct        distinct_values
+    ,s.most_common_vals  most_common_values_count
+    ,s.most_common_freqs most_common_values_frequency
+     ,TRUNC(s.null_frac * 100) || '%'  null_ratio 
+FROM pg_stats s
+WHERE 1=1
+    AND s.tablename = 'mytable'
+    AND s.attname = 'id'
+```
+
+There is no MCV stats: 
+
+| size\_bytes | distinct\_values | most\_common\_values\_count | most\_common\_values\_frequency | null\_ratio |
+|:------------|:-----------------|:----------------------------|:--------------------------------|:------------|
+| 4           | -1               | null                        | null                            | 0%          |
+
+
+There are histogram stats.
+```postgresql
+SELECT
+     s.avg_width         size_bytes
+    ,s.n_distinct        distinct_values
+    ,s.histogram_bounds
+    , cardinality(s.histogram_bounds) bucket_count
+FROM pg_stats s
+WHERE 1=1
+    AND s.tablename = 'mytable'
+    AND s.attname = 'id'
+```
+
+| size\_bytes | distinct\_values | histogram\_bounds                                     | bucket\_count |
+|:------------|:-----------------|:------------------------------------------------------|:--------------|
+| 4           | -1               | {46,10416,19805,30397,40551,...,979854,990149,999946} | 101           |
+
+
+Each bucket contains roughly the same count of rows.
+
+There can be no more that this many buckets, unless you change the setting (you can do it on a table basis). 
+```postgresql
+SHOW default_statistics_target 
+```
+100
+
+
+So what about our query ?
+```postgresql
+SELECT id 
+FROM mytable
+WHERE id = 1
+```
+
+Each bucket contains around 10 000 rows
+```postgresql
+SELECT
+    TRUNC(c.reltuples /  cardinality(s.histogram_bounds)) row_per_bucket     
+FROM pg_class c
+    JOIN pg_stats s ON s.tablename = c.relname
+WHERE 1=1
+    AND c.relname = 'mytable'
+```
+9900 rows
+
+The first bucket, contains our value `50`.
+It also covers more value, around 10 000 values
+```postgresql
+SELECT 10416 - 46 bucket1_size
+```
+10370 
+
+If we consider equiprobability (there are as many rows for 50 than for 10416)
+The row count per value is  
+```postgresql
+WITH bucket AS (
+    SELECT 
+        TRUNC(c.reltuples /  cardinality(s.histogram_bounds)) row_per_bucket,
+        (10416 - 46) first_bucket_size
+    FROM  pg_class c
+        JOIN pg_stats s ON s.tablename = c.relname
+    WHERE c.relname = 'mytable'
+    ) 
+SELECT 
+    ROUND(b.row_per_bucket / b.first_bucket_size) AS row_count
+FROM bucket b
+```
+1 row
+
+
+
 
 ## Several columns
 

@@ -1,5 +1,92 @@
 # More on storage
 
+## Auto-vacuum
+
+### Why
+
+For pedagogic purposes, we disabled auto-vacuum on the table. 
+```postgresql
+CREATE TABLE mytable (
+    id  integer
+) WITH (AUTOVACUUM_ENABLED = FALSE);
+```
+
+We run it manually.
+```postgresql
+VACUUM VERBOSE mytable;
+```
+
+You shall not do this on production.
+Instead, you should make sure auto-vacuum is properly configured and runs. 
+
+The last auto-vacuum run is available in `pg_stat_user_tables`.
+```postgresql
+SELECT last_autovacuum
+FROM pg_stat_user_tables t 
+WHERE t.relname = 'mytable'
+```
+
+Let's see how to configure it.
+
+### Start on update or delete
+
+These parameters control when autovacuum starts because of update or delete, aka dead tuples:
+- autovacuum_naptime : minimum delay between autovacuum - default is one minute
+- autovacuum_vacuum_threshold : minimum number of updated or deleted tuples - default : 50
+- autovacuum_vacuum_scale_factor : fraction of the table size - default is 0.2 (20% of table size).
+
+In short, by default:
+- each minute, if the last autovacuum ended more than a minute ago, the table statistics are queried;
+- is there (50 tuples + 20% of the rows of the table) as dead tuples ?
+- if yes, start an auto-vacuum.
+
+```postgresql
+WITH settings AS (
+  SELECT 
+       current_setting('autovacuum_vacuum_threshold')::INT threshold,
+       current_setting('autovacuum_vacuum_scale_factor')::DECIMAL scale_factor
+)
+SELECT 
+    t.n_dead_tup,
+    c.reltuples * s.scale_factor + s.threshold triggers_at,
+    (t.n_dead_tup::DECIMAL > c.reltuples * s.scale_factor + s.threshold) triggers
+FROM pg_class c INNER JOIN pg_stat_user_tables t ON t.relname = c.relname,
+     settings s 
+WHERE t.relname = 'mytable'
+```
+
+| n\_dead\_tup | triggers\_at | triggers |
+|:-------------|:-------------|:---------|
+| 0            | 200050       | false    |
+
+
+### Start on insert
+
+These parameters control when autovacuum starts on insert :
+- autovacuum_vacuum_insert_threshold : minimum number of inserted tuples - default : 1000
+- autovacuum_vacuum_insert_scale_factor :  fraction of the table size - default is 0.2 (20% of table size).
+
+```postgresql
+WITH settings AS (
+  SELECT 
+       current_setting('autovacuum_vacuum_insert_threshold')::INT threshold,
+       current_setting('autovacuum_vacuum_insert_scale_factor')::DECIMAL scale_factor
+)
+SELECT 
+    t.n_ins_since_vacuum,
+    c.reltuples * s.scale_factor + s.threshold triggers_at,
+    (t.n_dead_tup::DECIMAL > c.reltuples * s.scale_factor + s.threshold) triggers
+FROM pg_class c INNER JOIN pg_stat_user_tables t ON t.relname = c.relname,
+     settings s 
+WHERE t.relname = 'mytable'
+```
+
+| n\_ins\_since\_vacuum | triggers\_at | triggers |
+|:----------------------|:-------------|:---------|
+| 1000000               | 201000       | false    |
+
+[Reference](https://www.postgresql.org/docs/current/routine-vacuuming.html)
+
 ## Storage overhead 
 
 How much space is used for actual data ?
