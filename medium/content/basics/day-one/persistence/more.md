@@ -93,6 +93,8 @@ How much space is used for actual data ?
 What is the storage overhead ? We saw there is much overhead for an empty block.
 Now, what is this overhead for a whole table ?
 
+### single column
+
 ```postgresql
 DROP TABLE IF EXISTS mytable ;
 
@@ -131,8 +133,7 @@ SELECT
     4                                            data_size, 
     pg_size_pretty( 8 * 1024 / 226 ::BIGINT - 4) row_overhead
 ```
-36 bytes, whereas the only field is 4 bytes
-
+36 bytes, whereas the only field is 4 bytes.
 
 If we look at the doc, we find:
 - each block has 
@@ -169,6 +170,26 @@ SELECT TRUNC(904 / 8192 ::NUMERIC * 100) || ' %'
 
 [Source](https://www.postgresql.org/docs/current/storage-page-layout.html)
 
+
+The row header take the most part of overhead.
+On a million-row table, it is 22 MB header and 4 MB data.
+```postgresql
+WITH rows AS (
+  SELECT  
+    1_000_000 AS count,
+    4         AS row_size
+  )
+SELECT 
+    pg_size_pretty(rows.count * 23::BIGINT)         rows_header_size,
+    pg_size_pretty(rows.count * row_size::BIGINT)   rows_data_size
+FROM rows
+```
+| rows\_header\_size | rows\_data\_size |
+|:-------------------|:-----------------|
+| 22 MB              | 3906 kB          |
+
+
+### several columns
 
 If we create a table with
 - 1 integer - 4 bytes

@@ -102,7 +102,7 @@ Average:      999     75537  35438,81 275627,86      0,00       0  postgres: use
 
 ## What happened
 
-We see a process named `wal_writer` is also writing data, apart from the dat file insertion.
+We see a process named `wal_writer` is also writing data, apart from the data file insertion.
 Was he writing WAL files ?
 
 Let's check WAL files size
@@ -118,6 +118,23 @@ You get
 
 640 Mb WAL + 346 Mb data file, we pretty much found the cause: WAL files. 
 
+
+You can also use PostgreSQL process view to check who is doing I/O on database.
+```postgresql
+SELECT backend_type, SUBSTR(query, 1, 20), state, wait_event_type, wait_event
+FROM pg_stat_activity a
+WHERE 1=1
+    AND pid <> pg_backend_pid()
+    AND ( a.backend_type = 'client backend' AND state = 'active' OR a.backend_type =  'walwriter')
+```
+
+| backend\_type  | substr              | state  | wait\_event\_type | wait\_event |
+|:---------------|:--------------------|:-------|:------------------|:------------|
+| client backend | INSERT INTO mytable | active | IO                | WalSync     |
+| walwriter      |                     | null   | LWLock            | WALWrite    |
+
+
+[Sources](https://www.postgresql.org/docs/current/monitoring-stats.html#WAIT-EVENT-TABLE)
 
 See slides to understand how it works.
 

@@ -26,10 +26,6 @@ SHOW seq_page_cost
 1
 
 
-```postgresql
-SHOW random_page_cost 
-```
-
 #### Get rows from buffers
 
 We can know how any rows there are in each block ... if we read the block and check the item pointer.
@@ -125,10 +121,14 @@ SELECT * FROM mytable WHERE ctid = '(0,1)'
 
 You can only get it using an index.
 
+```postgresql
+SHOW random_page_cost 
+```
+
 What is the estimated cost ? 
 ```postgresql
 EXPLAIN 
-SELECT * FROM mytable WHERE ctid = '(0,1)'
+
 ```
 
 
