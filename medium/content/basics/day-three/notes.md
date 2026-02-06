@@ -1,4 +1,5 @@
-# Tuning
+# Notes
+
 
 ## Correctness over performance
 
@@ -81,9 +82,11 @@ Show the mapping between both
 
 ## cause of inefficient access paths
 
+TOP
 > There are several main causes of inefficient access paths:
 > - no suitable access structures (for example, indexes) are available.
 > - a suitable access structure is available, but the syntax of the SQL statement doesn’t allow the query optimizer to use it.
 > - the table or the index is partitioned, but no pruning is possible. As a result, all partitions are accessed.
 > - the table or the index, or both, aren’t suitably partitioned.
 > - when the query optimizer makes wrong estimations because of a lack of object statistics, object statistics that aren’t up-to-date, or a wrong query optimizer configuration is in place.
+
