@@ -1,4 +1,11 @@
-# Cache
+# Caching
+
+This applies to PostgreSQL as well.
+
+> When properly done, caching can increase the performance of your application by an order of magnitude. On the contrary, when overlooked or completely ignored, it can lead to some really unwanted side effects
+
+[Source: Leo Jacquemin](https://blog.octo.com/cache-me-if-you-can-1)
+
 
 ## OS feature reuse
 
@@ -279,16 +286,22 @@ Only 32 buffers have been loaded !
 | mytable      | 32            | 256 kB       |
 
 
-All sequential scan of tables whose size exceed 25% of the cache use a smallish part of the cache, 32 buffers, called a buffer ring. When the ring is full, row are filtered - if they match, copied in the private memory of the process who runs the query; then read continue from OS cache, overwriting the buffer ring, and the cycle goes on. 
+All sequential scan of tables whose size exceed 25% of the cache use a smallish part of the cache, 32 buffers, called the buffer ring. When the ring is full, row are filtered - if they match, copied in the private memory of the process who runs the query; then read continue from OS cache, overwriting the buffer ring, and the cycle goes on. 
 
-> Bulk reads strategy is used for sequential scans of large tables if their size exceeds of the buffer cache. The ring buffer takes 256 kn (32 standard pages).
+> Bulk reads strategy is used for sequential scans of large tables if their size exceeds 1/4 of the buffer cache. 
+> The ring buffer takes 256 kb (32 standard pages).
 
 Reference: PostgreSQL Internals, Part II - Buffer cache and WAL - Bulk eviction
+
+This advocates for proper design and partition of the tables.
+If your table is bigger that 25% of the cache, and is only accessed by seq scan, it will never be cached.
+It is not a problem by itself : if this table is seldomly accessed, and the response time is acceptable when it is accessed, everything's fine.
+Some tables are small and frequently accessed, e.g. reference tables (products, locations). 
+They may live permanently in the cache, at least the most frequently used blocks.
 
 ## Reading many tables
 
 If there is no space left in PostgreSQL cache, which happens all the time, some blocks should be evicted from the cache. In order to keep the one that are used most often, a usage counter is considered: the block that are evicted first are the less used.
-
 
 Let's create two tables
 ```postgresql

@@ -18,7 +18,11 @@ A single query may perform different actions, because of MVCC.
 
 Indexes have negative and positive impacts. 
 Anyway, most of the time, you will use a primary key on the table which will create its own index - which will slow down INSERT anyway.
-Therefore, if you need to load a huge amount of data, drop the primary key, load data, and recreate the primary key.  
+
+As Marcus Winand [said](https://use-the-index-luke.com/sql/dml/insert)
+> The first index makes the greatest difference.
+
+If you need to load a huge amount of data, drop the primary key, load data, and recreate the primary key.  
 
 ### Positive 
 

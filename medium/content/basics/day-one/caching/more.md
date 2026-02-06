@@ -1,6 +1,5 @@
 # More
 
-
 ## Statistics
 
 ### Cache hit
@@ -132,4 +131,5 @@ WHERE 1=1
 ```
 
 ## OS cache
+
 We can clear the OS cache and check how this affects performance.
