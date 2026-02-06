@@ -1,5 +1,13 @@
 # Access paths
 
+As more and more data made their way into your system, you should think about scalability.
+
+Sequential scan complexity is O(n)
+
+How can we keep execution time constant :
+- depending on only of the size of the result set;
+- independently of the underlying data size ?
+
 ## Read data more quickly
 
 
@@ -155,4 +163,14 @@ WHERE 1=1
 
 ## Read less data
 
+### By design
+
+You can read less data by storing less data in the table, by having fewer columns (normalization) of fewer rows (archiving).
+However, if this has not been done by design at the very start, it can lead to massive application code change. 
+
 ### Partitions
+
+
+### Indexes
+
+We'll cover them in detail later.

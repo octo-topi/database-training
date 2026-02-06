@@ -87,7 +87,7 @@ SELECT SUM(id)
 FROM (SELECT id FROM mytable ORDER BY id DESC)
 ```
 
-There is no more logs.
+There is no more temp logs.
 ```shell
 docker logs postgresql 2>&1 | grep temp
 ```
@@ -112,9 +112,9 @@ On a single query, use EXPLAIN with ANALYZE.
 On a single query, use `psql` client : 
   - get execution time using [timing parameter](https://www.postgresql.org/docs/current/app-psql.html#APP-PSQL-META-COMMAND-TIMING) or use OS timing;
   - you must fetch the results;
-  - you must execute teh query several times.
+  - you must execute the query several times.
 
-On all queries, add execution time in logs.
+On all queries, add execution time or execution plan in logs.
 
 [Tutorial](https://github.com/GradedJestRisk/batch-queries-postgresql/blob/main/basic-container-management/directives.md)
 

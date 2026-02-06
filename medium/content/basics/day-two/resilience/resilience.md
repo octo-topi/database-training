@@ -1,6 +1,11 @@
-# WAL
+# Resilience
 
 ## Create data
+
+Start I/O monitoring
+```shell
+iostat --human 10 | awk 'BEGIN {print "Size(R - W)"} /$DEVICE/  {print $6  " - " $7}'
+```
 
 Add many rows (last 4 seconds)
 ```postgresql
@@ -9,15 +14,7 @@ SELECT n
 FROM generate_series(1, 10_000_000) AS n;
 ```
 
-What's table size ?
-```postgresql
-SELECT pg_size_pretty(pg_table_size('mytable'))  table_size
-```
-346 MB
-
-You get a lot of writes, which is expected.
-But why 1GB, more than table size ?
-Because, at least, of WAL files.
+You get these figures
 ```text
 Size(R - W)
 0,0k - 3,8M
@@ -25,16 +22,104 @@ Size(R - W)
 156,0k - 20,8M
 ```
 
-Check WAL files size
+What's table size ?
+```postgresql
+SELECT pg_size_pretty(pg_table_size('mytable'))  table_size
+```
+346 MB
+
+Why did we write 1GB, more than the table size ?
+To know what happened, we need to get the I/O for each PostgreSQL process.
+
+## Get each PG processes I/O
+
+Until now, we only have I/O activity for all processes.
+We need to display I/O of some processes, the children of `postgres` process.
+
+Wa can use `iotop` or `pidstat`, both available in `sysstat` package.
+```shell
+sudo apt install sysstat
+```
+
+### iotop
+
+`iotop` version on Ubuntu is 0.6, whereas the [current version is 1.31](https://github.com/Tomas-M/iotop).
+```shell
+iotop --version
+```
+
+The command below use 0.6 version, which does not use the [latest parameters](https://man7.org/linux/man-pages/man8/iotop.8.html).
+
+You run `iotop`:
+- display only process whose command start by `postgres: `
+- who actually does io `--only`
+- output each `--delay` seconds in `--batch` mode (no interactive)
+
+```shell
+sudo iotop --only --batch --delay=1 | grep "postgres: "
+```
+You get
+```text
+36.70 M/s  294.67 M/s  postgres: user database 172.18.0.1(36188) INSERT
+ 0.00 B/s 1648.97 K/s  postgres: walwriter
+35.55 M/s  283.78 M/s  postgres: user database 172.18.0.1(36188) INSERT
+ 0.00 B/s    3.58 M/s  postgres: checkpointer
+ 0.00 B/s    7.65 M/s  postgres: walwriter
+35.52 M/s  273.85 M/s  postgres: user database 172.18.0.1(36188) INSERT
+ 0.00 B/s   12.76 M/s  postgres: walwriter
+34.93 M/s  267.93 M/s  postgres: user database 172.18.0.1(36188) INSERT
+ 0.00 B/s   19.13 K/s  postgres: checkpointer
+ 0.00 B/s    4.82 M/s  postgres: walwriter
+36.94 M/s  292.49 M/s  postgres: user database 172.18.0.1(36188) INSERT
+```
+
+### pidtstat
+
+
+`pidtstat` version on Ubuntu is 12.5.2 whereas the [current version is 12.7.9](https://github.com/sysstat/sysstat/tags).
+```shell
+pidstat -V
+```
+
+The command below use 12.5.2 version, which does not use the [latest parameters](https://man7.org/linux/man-pages/man1/pidstat.1.html).
+
+You ask `pidtstat`:
+- to show IO `-d`
+- to show full command `-l`
+- to refresh each 2 seconds `2`
+
+```shell
+sudo pidstat -C "postgres: " -l -d 2
+```
+
+You get
+```text
+Average:      UID       PID   kB_rd/s   kB_wr/s kB_ccwr/s iodelay  Command
+Average:      999     49010      0,00   8830,85      0,00       0  postgres: walwriter 
+Average:      999     75537  35438,81 275627,86      0,00       0  postgres: user database 172.18.0.1(36188) INSERT
+```
+
+
+## What happened
+
+We see a process named `wal_writer` is also writing data, apart from the dat file insertion.
+Was he writing WAL files ?
+
+Let's check WAL files size
 ```shell
 just storage
 du --human $PGDATA/pg_wal
 ```
 
-640 Mb
+You get
 ```text
 641M	/var/lib/postgresql/data/pg_wal
 ```
+
+640 Mb WAL + 346 Mb data file, we pretty much found the cause: WAL files. 
+
+
+See slides to understand how it works.
 
 ## Access data
 
@@ -42,6 +127,10 @@ Setting hint bits does not generate WAL files, unless `wal_log_hints=on`;
 [Source](https://www.postgresql.org/docs/current/runtime-config-wal.html#GUC-WAL-LOG-HINTS)
 
 Why is it 640 Mb instead of table size, 346 Mb ?
+Because WAL file 
+- have their own metadata that add overhead
+- contains more than rows: CLOG, checkpoints..
+
 [Source](https://fluca1978.github.io/2021/07/15/PostgreSQLWalTraffic2.html)
 
 ## Recycle WAL
@@ -313,43 +402,3 @@ No dirty
 
 
 Reference: PostgreSQL Internals, Part II - Buffer cache and WAL - Write-Ahead Log / Recovery
-
-## More
-
-If you WAL file is huge, you can get an overall
-```shell
-pg_waldump --stats --path=$PGDATA/pg_wal --start=1/33B3C5E0 --end=1/33B3C6B0
-```
-
-We sse 
-- there are 2 entries
-- there is much  `Heap/Record`
-```text
-WAL statistics between 1/33B3C5E0 and 1/33B3C648:
-Type                                           N      (%)          Record size      (%)             FPI size      (%)        Combined size      (%)
-----                                           -      ---          -----------      ---             --------      ---        -------------      ---
-XLOG                                           0 (  0.00)                    0 (  0.00)                    0 (  0.00)                    0 (  0.00)
-Transaction                                    1 ( 50.00)                   34 ( 36.56)                    0 (  0.00)                   34 ( 36.56)
-Storage                                        0 (  0.00)                    0 (  0.00)                    0 (  0.00)                    0 (  0.00)
-CLOG                                           0 (  0.00)                    0 (  0.00)                    0 (  0.00)                    0 (  0.00)
-Database                                       0 (  0.00)                    0 (  0.00)                    0 (  0.00)                    0 (  0.00)
-Tablespace                                     0 (  0.00)                    0 (  0.00)                    0 (  0.00)                    0 (  0.00)
-MultiXact                                      0 (  0.00)                    0 (  0.00)                    0 (  0.00)                    0 (  0.00)
-RelMap                                         0 (  0.00)                    0 (  0.00)                    0 (  0.00)                    0 (  0.00)
-Standby                                        0 (  0.00)                    0 (  0.00)                    0 (  0.00)                    0 (  0.00)
-Heap2                                          0 (  0.00)                    0 (  0.00)                    0 (  0.00)                    0 (  0.00)
-Heap                                           1 ( 50.00)                   59 ( 63.44)                    0 (  0.00)                   59 ( 63.44)
-Btree                                          0 (  0.00)                    0 (  0.00)                    0 (  0.00)                    0 (  0.00)
-Hash                                           0 (  0.00)                    0 (  0.00)                    0 (  0.00)                    0 (  0.00)
-Gin                                            0 (  0.00)                    0 (  0.00)                    0 (  0.00)                    0 (  0.00)
-Gist                                           0 (  0.00)                    0 (  0.00)                    0 (  0.00)                    0 (  0.00)
-Sequence                                       0 (  0.00)                    0 (  0.00)                    0 (  0.00)                    0 (  0.00)
-SPGist                                         0 (  0.00)                    0 (  0.00)                    0 (  0.00)                    0 (  0.00)
-BRIN                                           0 (  0.00)                    0 (  0.00)                    0 (  0.00)                    0 (  0.00)
-CommitTs                                       0 (  0.00)                    0 (  0.00)                    0 (  0.00)                    0 (  0.00)
-ReplicationOrigin                              0 (  0.00)                    0 (  0.00)                    0 (  0.00)                    0 (  0.00)
-Generic                                        0 (  0.00)                    0 (  0.00)                    0 (  0.00)                    0 (  0.00)
-LogicalMessage                                 0 (  0.00)                    0 (  0.00)                    0 (  0.00)                    0 (  0.00)
-                                        --------                      --------                      --------                      --------
-Total                                          2                            93 [100.00%]                   0 [0.00%]                    93 [100%]
-```

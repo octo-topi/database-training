@@ -1,39 +1,44 @@
 # More
 
-## WAL in a nutshell
+## Explore WAL file
 
-Using write-ahead log, you write in WAL **ahead** of writing in data files. It's a permanent-storage deferred write.
-That means datafile are inconsistent most of the time, only the shared buffer (cache) is consistent. 
+If you WAL file is huge, you can get an overall using `--stats` parameter.
+```shell
+pg_waldump --stats --path=$PGDATA/pg_wal --start=1/33B3C5E0 --end=1/33B3C6B0
+```
 
-You trade space for speed :
-- data is written in several places, it is redundant, so it takes more space;
-- but the WAL files are quicker to write - this way, you can keep dirty data in cache, without writing it on disk immediately.
-
-Any way, you do not compromise integrity.
-
-## WAL vs Data files
-
-WAL files are :
-- short-lived
-- write once, never read
-- written in a sequential manner
-- written synchronously
-- reusable
-- low volume
-
-It's appropriate to put them on a quick, small filesystem.
-
-Data files are :
-- long-lived
-- written and read many times
-- written in a random manner
-- written asynchronously
-- not reusable
-- high volume
-
-It's appropriate to put them on a big, slower filesystem.
-
-If you can't get two different speed filesystem, you should at least get two devices for integrity.
+We see 
+- there are 2 entries
+- there is much  `Heap/Record`
+```text
+WAL statistics between 1/33B3C5E0 and 1/33B3C648:
+Type                                           N      (%)          Record size      (%)             FPI size      (%)        Combined size      (%)
+----                                           -      ---          -----------      ---             --------      ---        -------------      ---
+XLOG                                           0 (  0.00)                    0 (  0.00)                    0 (  0.00)                    0 (  0.00)
+Transaction                                    1 ( 50.00)                   34 ( 36.56)                    0 (  0.00)                   34 ( 36.56)
+Storage                                        0 (  0.00)                    0 (  0.00)                    0 (  0.00)                    0 (  0.00)
+CLOG                                           0 (  0.00)                    0 (  0.00)                    0 (  0.00)                    0 (  0.00)
+Database                                       0 (  0.00)                    0 (  0.00)                    0 (  0.00)                    0 (  0.00)
+Tablespace                                     0 (  0.00)                    0 (  0.00)                    0 (  0.00)                    0 (  0.00)
+MultiXact                                      0 (  0.00)                    0 (  0.00)                    0 (  0.00)                    0 (  0.00)
+RelMap                                         0 (  0.00)                    0 (  0.00)                    0 (  0.00)                    0 (  0.00)
+Standby                                        0 (  0.00)                    0 (  0.00)                    0 (  0.00)                    0 (  0.00)
+Heap2                                          0 (  0.00)                    0 (  0.00)                    0 (  0.00)                    0 (  0.00)
+Heap                                           1 ( 50.00)                   59 ( 63.44)                    0 (  0.00)                   59 ( 63.44)
+Btree                                          0 (  0.00)                    0 (  0.00)                    0 (  0.00)                    0 (  0.00)
+Hash                                           0 (  0.00)                    0 (  0.00)                    0 (  0.00)                    0 (  0.00)
+Gin                                            0 (  0.00)                    0 (  0.00)                    0 (  0.00)                    0 (  0.00)
+Gist                                           0 (  0.00)                    0 (  0.00)                    0 (  0.00)                    0 (  0.00)
+Sequence                                       0 (  0.00)                    0 (  0.00)                    0 (  0.00)                    0 (  0.00)
+SPGist                                         0 (  0.00)                    0 (  0.00)                    0 (  0.00)                    0 (  0.00)
+BRIN                                           0 (  0.00)                    0 (  0.00)                    0 (  0.00)                    0 (  0.00)
+CommitTs                                       0 (  0.00)                    0 (  0.00)                    0 (  0.00)                    0 (  0.00)
+ReplicationOrigin                              0 (  0.00)                    0 (  0.00)                    0 (  0.00)                    0 (  0.00)
+Generic                                        0 (  0.00)                    0 (  0.00)                    0 (  0.00)                    0 (  0.00)
+LogicalMessage                                 0 (  0.00)                    0 (  0.00)                    0 (  0.00)                    0 (  0.00)
+                                        --------                      --------                      --------                      --------
+Total                                          2                            93 [100.00%]                   0 [0.00%]                    93 [100%]
+```
 
 ## How much data can you lose, anyway ?
 
