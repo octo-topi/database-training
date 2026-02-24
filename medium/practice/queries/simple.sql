@@ -1,0 +1,1 @@
+select max(flight_id) from boarding_passes;

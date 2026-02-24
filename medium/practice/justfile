@@ -1,0 +1,42 @@
+setup:
+    sudo chown microsoft-identity-broker postgresql.conf
+
+create-dataset:
+    curl --output dump.zip https://edu.postgrespro.com/demo-big-en.zip
+    unzip dump.zip && rm dump.zip && mv demo-big-en-20170815.sql dump.sql
+    psql --dbname "$CONNECTION_STRING" --file dump.sql
+    psql --dbname "$CONNECTION_STRING" --command="DROP DATABASE IF EXISTS flight;"
+    psql --dbname "$CONNECTION_STRING" --command="ALTER DATABASE demo RENAME TO flight;"
+    rm dump.sql
+    echo "You can connect using $CONNECTION_STRING_FLIGHT"
+
+start:
+    docker compose up --detach --wait postgresql
+
+stop:
+    docker compose down
+
+restart:
+    just stop
+    just start
+
+console:
+    psql --dbname "$CONNECTION_STRING_FLIGHT"
+
+maintenance:
+    psql --dbname "$CONNECTION_STRING_FLIGHT" --file=./queries/maintenance.sql
+
+shell:
+    docker exec -it $CONTAINER_NAME bash
+
+logs:
+    docker logs --follow $CONTAINER_NAME
+
+clean:
+    docker compose down --volumes
+
+pgactivity:
+    pg_activity "$CONNECTION_STRING_FLIGHT"
+
+pgbench:
+    time --format='Elapsed: %e seconds ' pgbench --protocol=extended --connect --client=20 --jobs=4 --transactions=200 --no-vacuum --progress=5 --file=./queries/simple.sql
