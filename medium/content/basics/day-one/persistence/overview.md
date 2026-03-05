@@ -17,7 +17,7 @@ It is not optimized for searching, as access is sequential.
 
 To accommodate for variable-length data type like text :
 - PostgreSQL store only the content of the row data (no padding);
-- rows are accessed in a block using pointer, which are stored at the start of the block;
+- rows are accessed in a block using pointer, which is stored at the start of the block;
 - this indirect addressing expose an identifier called `ctid`, its value is `( $BLOCK_NUMBER : $ITEM_NUMBER)`.
 
 ## Reuse
@@ -37,7 +37,6 @@ Some statistics are available on table :
 Some statistics should be updated by `ANALYZE`:
 - size (DB blocks) : `pg_class.relpages` ;
 - space usage: `pg_stat_user_tables.n_live_tup, n_dead_tup` 
-
 
 Usage statistics can be reset using `pg_stat_reset_single_table_counters($TABLE)`.
 

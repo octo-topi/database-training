@@ -1,3 +1,5 @@
+# Concurrency
+
 ## What if we do not commit ?
 
 We use implicit COMMIT till now. What if we use explicit COMMIT, that is, we start a transaction ?
@@ -12,7 +14,7 @@ Will they be stored on disk ?
 ```postgresql
 DROP TABLE IF EXISTS mytable;
 
-CREATE TABLE mytable (
+CREATE TABLE if not exisTS mytable (
     id  integer
 ) WITH (AUTOVACUUM_ENABLED = FALSE);
 
@@ -20,7 +22,7 @@ BEGIN TRANSACTION;
 
 INSERT INTO mytable (id)
 SELECT n
-FROM generate_series(1, 10000000) AS n;
+FROM generate_series(1, 10_000_000) AS n;
 ```
 
 Check size on disk
@@ -143,7 +145,7 @@ CREATE TABLE mytable (
 
 INSERT INTO mytable (id)
 SELECT n
-FROM generate_series(1, 10000000) AS n;
+FROM generate_series(1, 10_000_000) AS n;
 ```
 
 Check size on disk
@@ -257,6 +259,7 @@ This operation should be performed each time a block is read, and all blocks sho
 ### Displaying row versions and hint bits
 
 ```postgresql
+ROLLBACK;
 DROP TABLE IF EXISTS mytable;
 
 CREATE TABLE mytable (
@@ -264,19 +267,23 @@ CREATE TABLE mytable (
 ) WITH (AUTOVACUUM_ENABLED = FALSE);
 ```
 
+
 Insert a first row
 ```postgresql
 BEGIN TRANSACTION;
 SELECT pg_current_xact_id();
 --859
 INSERT INTO mytable(id) VALUES (0);
+
+SELECT * FROM heap_page('mytable', 0);
+
 COMMIT;
+
 SELECT * FROM heap_page('mytable', 0);
 ```
 | ctid    | state  | xmin | xmax |
 |:--------|:-------|:-----|:-----|
 | \(0,1\) | normal | 859  | 0 a  |
-
 
 Update it
 ```postgresql
@@ -299,6 +306,8 @@ SELECT *
 FROM mytable
 ```
 
+Pattern cache "stale while revalidate"
+
 The hint bits have been set
 ```postgresql
 SELECT * FROM heap_page('mytable', 0);
@@ -310,14 +319,13 @@ SELECT * FROM heap_page('mytable', 0);
 | \(0,2\) | normal | 860 c | 0 a   |
 
 
-
 ## Optimizations
 
 There is therefore many optimization to skip it:
 - the first time the row is read:
    - the status of the transaction for xmin and xmax are stored in the row header;
    - if the row is visible to all transactions, a flag is set on row header;
-- when a vacuum is executed, if all rows in a block are visible to all transactions, the block is  written in the visibility map, which is a separate file.
+- when a vacuum is executed, if all rows in a block are visible to all transactions, the block is written in the visibility map, which is a separate file.
 
 We can understand now that MVCC is optimized to write data change quickly:
 - changes of table data are written immediately to fs, not waiting for COMMIT;
@@ -393,108 +401,27 @@ The missing 122 Mb are written.
 0,0k - 2,3M
 ```
 
-If you wonder why no WAL files have been written, this is a configuration. This information is not critical.
+If you wonder why no WAL files have been written, this is a configuration. 
+HInt bits information is not critical.
 
 ```postgresql
 SHOW wal_log_hints
 ```
 
+[wal_long_hints](https://www.postgresql.org/docs/current/runtime-config-wal.html#GUC-WAL-LOG-HINTS)
 
 Reference: PostgreSQL Internals, Part I - Isolation and MVCC / Page and tuples / Operations on tuples / Commit
 
-### Setting all_visible in visibility map on VACUUM
-
-````postgresql
-TRUNCATE TABLE mytable
-````
-
-Add many rows: 10 million (last 40 seconds)
-```postgresql
-INSERT INTO mytable (id)
-SELECT n
-FROM generate_series(1, 10000000) AS n;
-```
-
-```postgresql
-ANALYZE VERBOSE mytable
-```
-
-Visibility map for a table
-```postgresql
-SELECT
-   relpages       block_count          -- Number of pages
-   ,relallvisible  all_visible_block_count   -- Number of pages that are visible to all transactions
-FROM pg_class
-WHERE 1=1
-    AND relname = 'mytable'
-    --AND relpages <> 0
-;
-```
-
-| block\_count | all\_visible\_block\_count |
-|:-------------|:---------------------------|
-| 44248        | 0                          |
-
-
-```postgresql
-VACUUM VERBOSE mytable
-```
-
-Visibility map for a table
-```postgresql
-SELECT
-   relpages       block_count          
-   ,relallvisible  all_visible_block_count 
-   ,TRUNC(relallvisible / relpages) * 100 || ' %' pct_visible
-FROM pg_class
-WHERE 1=1
-    AND relname = 'mytable'
-    --AND relpages <> 0
-;
-```
-
-| block\_count | all\_visible\_block\_count | pct\_visible |
-|:-------------|:---------------------------|:-------------|
-| 44248        | 44248                      | 100 %        |
-
-
-```postgresql
-SELECT relpages block_count
-FROM pg_class WHERE relname = 'mytable';
-```
-
-[Reference](https://www.cybertec-postgresql.com/en/speeding-up-things-with-hint-bits/)
-
-### Mark row version as dead on SELECT
-
-AKA Page pruning.
-
-Now you know that PostgreSQL is optimized for few writes, many read. What if you  update the same row many times ? It will create many versions, and older ones will be discarded quickly. 
-
-That means several things:
-- the size of your table will keep growing;
-- therefore any sequential scan will take longer;
-- unless you do some VACUUM, but VACUUM use resources (CPU and I/O) and cause contention (lock).
-
-What can you do to mitigate that ?
-You can use a feature call fillfactor to keep some space in the block for row's update, so that UPDATE create the version in the same block. When a SELECT read a block which does not have enough free space, it checks if the versions in the block are still visible. If not, it marks these versions as dead.
-
-Therefore, an UPDATE with happens afterward on the block can use the space of the dead version to create a new version: you didn't have to trigger a VACUUM on the whole table and you have its benefits.
-
-There is even more: all live versions in blocks are moved to the end, allowing for a single continuous free space at the beginning: no fragmentation.
-
-Need a fill factor < 100% and update rows several times (INSERT doesn't work)
-
-
- But pointer to tuples are not removed, because they may be referenced by indexes (move this to index section ?)
-
-Reference: PostgreSQL Internals, Part I - Isolation and MVCC / Page pruning
-
-
 ## Beware of long-running transaction
 
+You saw in the persistence chapter than VACUUM is useful for deleted rows.
+Now you understand why vacuum do much more than this: vacuum free space used by obsolete versions of a row.
+A row should not be kept when it has been deleted, but an update in PostgreSQL render a row version obsolete.
+If you update a row many times, several time between vacuum, the table will grow steadily, which you may want to avoid. 
+
 Until now, we only dealt with one table, but transaction encompass all tables.
-At higher isolation level than default, consistency is extended beyond the duration of a single statement and encompass the whole transaction. Therefore, even rows that have been deleted on ta ble T by a commited transaction should be kept for another still-running transaction, which may access T in the future. That means vacuuming is deffered until this transaction ends.
+
+At higher isolation level than default, consistency is extended beyond the duration of a single statement and encompass the whole transaction.Therefore, even rows that have been deleted on table T by a commited transaction should be kept for another still-running transaction, which may access T in the future. That means vacuuming is deffered until this transaction ends.
 
 At the worst, if the transaction keep on for hours or days, the database may allocate more and more disk space, only to handle updates.
 
@@ -508,3 +435,94 @@ horizon in the same way, even if it is not executing any operators (being in the
 “idle in transaction” state).
 
 Reference: PostgreSQL Internals, Part I - Isolation and MVCC / Snapshot
+
+## Auto-vacuum
+
+### Why is auto-vacuum disabled ?
+
+For pedagogic purposes, we disabled auto-vacuum on the table. 
+```postgresql
+CREATE TABLE mytable (
+    id  integer
+) WITH (AUTOVACUUM_ENABLED = FALSE);
+```
+
+We run it manually.
+```postgresql
+VACUUM VERBOSE mytable;
+```
+
+You shall not do this on production.
+Instead, you should make sure auto-vacuum is properly configured and runs. 
+
+The last auto-vacuum run is available in `pg_stat_user_tables`.
+```postgresql
+SELECT last_autovacuum
+FROM pg_stat_user_tables t 
+WHERE t.relname = 'mytable'
+```
+
+Let's see how to configure it.
+
+### Start on update or delete
+
+These parameters control when autovacuum starts because of update or delete, aka dead tuples:
+- autovacuum_naptime : minimum delay between autovacuum - default is one minute
+- autovacuum_vacuum_threshold : minimum number of updated or deleted tuples - default : 50
+- autovacuum_vacuum_scale_factor : fraction of the table size - default is 0.2 (20% of table size).
+
+In short, by default:
+- each minute, if the last autovacuum ended more than a minute ago, the table statistics are queried;
+- is there (50 tuples + 20% of the rows of the table) as dead tuples ?
+- if yes, start an auto-vacuum.
+
+-- TODO: add defragmentation in VACUUM vs SELECT
++ vacuum_cost_limit
+```postgresql
+WITH settings AS (
+  SELECT 
+       current_setting('autovacuum_vacuum_threshold')::INT threshold,
+       current_setting('autovacuum_vacuum_scale_factor')::DECIMAL scale_factor
+)
+SELECT 
+    t.n_dead_tup,
+    c.reltuples * s.scale_factor + s.threshold triggers_at,
+    (t.n_dead_tup::DECIMAL > c.reltuples * s.scale_factor + s.threshold) triggers
+FROM pg_class c INNER JOIN pg_stat_user_tables t ON t.relname = c.relname,
+     settings s 
+WHERE t.relname = 'mytable'
+```
+
+| n\_dead\_tup | triggers\_at | triggers |
+|:-------------|:-------------|:---------|
+| 0            | 200050       | false    |
+
+
+-- cTIODO: add exemple to se t and get settinsg on tabkle
+
+### Start on insert
+
+These parameters control when autovacuum starts on insert :
+- autovacuum_vacuum_insert_threshold : minimum number of inserted tuples - default : 1000
+- autovacuum_vacuum_insert_scale_factor :  fraction of the table size - default is 0.2 (20% of table size).
+
+```postgresql
+WITH settings AS (
+  SELECT 
+       current_setting('autovacuum_vacuum_insert_threshold')::INT threshold,
+       current_setting('autovacuum_vacuum_insert_scale_factor')::DECIMAL scale_factor
+)
+SELECT 
+    t.n_ins_since_vacuum,
+    c.reltuples * s.scale_factor + s.threshold triggers_at,
+    (t.n_dead_tup::DECIMAL > c.reltuples * s.scale_factor + s.threshold) triggers
+FROM pg_class c INNER JOIN pg_stat_user_tables t ON t.relname = c.relname,
+     settings s 
+WHERE t.relname = 'mytable'
+```
+
+| n\_ins\_since\_vacuum | triggers\_at | triggers |
+|:----------------------|:-------------|:---------|
+| 1000000               | 201000       | false    |
+
+[Reference](https://www.postgresql.org/docs/current/routine-vacuuming.html)

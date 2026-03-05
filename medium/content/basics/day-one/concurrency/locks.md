@@ -6,8 +6,6 @@ Isolation levels are not the only feature to control concurrency.
 
 Lock are another feature.
 
-Q:
-
 In "Read commited" isolation level
 
 If a query is reading a table: 
@@ -17,10 +15,10 @@ If a query is reading a table:
 - can a query which add a column be executed without waiting ?
 - can a query which remove a column be executed without waiting ?
 
-
 In PostgreSQL
 - writer don't block reader
 - reader don't block writer
 
+## Find out locks
 
-https://blog.octo.com/7-things-a-developer-should-know-about-databases
+[A blog entry](https://blog.octo.com/7-things-a-developer-should-know-about-databases)

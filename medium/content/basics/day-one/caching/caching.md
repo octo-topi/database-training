@@ -2,7 +2,8 @@
 
 This applies to PostgreSQL as well.
 
-> When properly done, caching can increase the performance of your application by an order of magnitude. On the contrary, when overlooked or completely ignored, it can lead to some really unwanted side effects
+> When properly done, caching can increase the performance of your application by an order of magnitude. 
+> On the contrary, when overlooked or completely ignored, it can lead to some really unwanted side effects
 
 [Source: Leo Jacquemin](https://blog.octo.com/cache-me-if-you-can-1)
 
@@ -21,7 +22,7 @@ I/O make no difference : PostgreSQL use the OS to access the filesystem and devi
 When a user process want to read a file:
 - a system call is made to the OS;
 - the OS find all the blocks where the file is located;
-- the OS looks into the cache, a zone in memory, for blocks;
+- the OS looks into its cache, a zone in memory, for blocks;
 - if the blocks are all there, he returns them to the user process;
 - if some blocks are missing, the OS reads them from the device:
   - it puts the blocks in cache;
@@ -44,7 +45,7 @@ WHERE id = 1
 
 Q: Should all data from the table go through the OS cache and returned to the database, even thought only one row is needed ?
 
-We may think it would be enough to filter out all data before returning it to the database, but we saw the storage format of a database block: the row's fields values cannot be read directly, and the visibility rules should be applied. Therefore, there is no filtering. If the file is 1 GB, 1GB will be returned to the database, even though no rows match the query.
+R: Yes. We may think it would be enough to filter out all data before returning it to the database, but we saw the storage format of a database block: the row's fields values cannot be read directly, and the visibility rules should be applied. Therefore, there is no filtering. If the file is 1 GB, 1GB will be returned to the database, even though no rows match the query.
 
 ## Blocks, blocks 
 
@@ -67,6 +68,8 @@ The data is stored "as-is", without being decoded. There is no way to find a row
 
 ## Reading a table 
 
+### Peek into the cache
+
 All data should go through the cache for you to handle them, but you can't see the cache itself.
 
 However, you can use an extension for exploration purposes.
@@ -84,7 +87,7 @@ CREATE TABLE mytable (
 
 INSERT INTO mytable (id)
 SELECT n
-FROM generate_series(1, 100000) AS n;
+FROM generate_series(1, 100_000) AS n;
 ```
 
 Table size is 3 Mb
@@ -92,7 +95,7 @@ Table size is 3 Mb
 SELECT pg_size_pretty(pg_table_size('mytable'))  table_size;
 ```
 
-The cache is empty at startup, let's restart the instance.
+The cache is in RAM, therefore emptied at container startup : let's restart the instance.
 ```shell
 just restart-instance
 ```
@@ -137,6 +140,9 @@ LIMIT 3;
 
 
 We've got a bunch of systems objects. 
+
+### Filter on SELECT using ctid
+
 Let's filter them out and query our table.
 ```postgresql
 SELECT *
@@ -181,6 +187,8 @@ WHERE 1=1
       AND c.relname NOT LIKE 'pg_%'
 --     AND c.relname = 'mytable'
 ```
+
+### Filter on SELECT
 
 Q: If we do not filter by a physical pointer, what happens ?
 ```postgresql
@@ -241,7 +249,7 @@ CREATE TABLE mytable (
 
 INSERT INTO mytable (id)
 SELECT n
-FROM generate_series(1, 10000000) AS n;
+FROM generate_series(1, 10_000_000) AS n;
 ```
 
 Table size is 346 Mb
@@ -286,7 +294,7 @@ Only 32 buffers have been loaded !
 | mytable      | 32            | 256 kB       |
 
 
-All sequential scan of tables whose size exceed 25% of the cache use a smallish part of the cache, 32 buffers, called the buffer ring. When the ring is full, row are filtered - if they match, copied in the private memory of the process who runs the query; then read continue from OS cache, overwriting the buffer ring, and the cycle goes on. 
+All sequential scan of tables whose size exceed 25% of the cache use a smallish part of the cache, 32 buffers, called the buffer ring. When the ring is full, row are filtered - if they match, they are copied in the private memory of the process who runs the query; then read continue from OS cache, overwriting the buffer ring, and the cycle goes on. 
 
 > Bulk reads strategy is used for sequential scans of large tables if their size exceeds 1/4 of the buffer cache. 
 > The ring buffer takes 256 kb (32 standard pages).
@@ -299,7 +307,7 @@ It is not a problem by itself : if this table is seldomly accessed, and the resp
 Some tables are small and frequently accessed, e.g. reference tables (products, locations). 
 They may live permanently in the cache, at least the most frequently used blocks.
 
-## Reading many tables
+## Reading many tables - eviction
 
 If there is no space left in PostgreSQL cache, which happens all the time, some blocks should be evicted from the cache. In order to keep the one that are used most often, a usage counter is considered: the block that are evicted first are the less used.
 
@@ -313,7 +321,7 @@ CREATE TABLE mytable (
 
 INSERT INTO mytable (id)
 SELECT n
-FROM generate_series(1, 100000) AS n;
+FROM generate_series(1, 100_000) AS n;
 
 DROP TABLE IF EXISTS yourtable;
 
@@ -323,7 +331,7 @@ CREATE TABLE yourtable (
 
 INSERT INTO yourtable (id)
 SELECT n
-FROM generate_series(1, 100000) AS n;
+FROM generate_series(1, 100_000) AS n;
 ```
 
 The cache is empty at startup, let's restart the instance.
@@ -366,7 +374,23 @@ SELECT *
 FROM mytable
 WHERE 1=1
     AND ctid = '(0,1)'
+--    and id = 1
 ```
+
+```postgresql
+SELECT
+    b.relblocknumber,
+    b.usagecount,    b.*
+FROM pg_class c
+         INNER JOIN pg_buffercache b ON b.relfilenode = c.relfilenode
+         INNER JOIN pg_database d ON (b.reldatabase = d.oid AND d.datname = current_database())
+WHERE 1=1
+      AND c.relname NOT LIKE 'pg_%'
+      AND c.relname = 'mytable'
+order by b.relblocknumber
+```
+
+
 
 ```postgresql
 SELECT
@@ -421,8 +445,21 @@ As no table which is bigger than 25% of the cache can be loaded completely, it i
 | mytable   | 5          | 1     |
 | yourtable | 1          | 443   |
 
+```postgresql
+DROP TABLE IF EXISTS theirtable;
 
-## Modifying data 
+CREATE TABLE theirtable (
+    id  integer
+) WITH (AUTOVACUUM_ENABLED = FALSE);
+
+INSERT INTO theirtable (id)
+SELECT n
+FROM generate_series(1, 10_000_000) AS n;
+```
+
+
+
+## Modifying data - dirty blocks
 
 What happens if we modify a row, that is, we create a new version ?
 
@@ -456,7 +493,7 @@ FROM pg_class c
          INNER JOIN pg_database d ON (b.reldatabase = d.oid AND d.datname = current_database())
 WHERE 1=1
     AND c.relname = 'mytable'
-    AND b.relblocknumber = 88495
+    AND b.relblocknumber = 442
     --AND b.relblocknumber = 1
     AND b.isdirty IS TRUE
 ```
@@ -479,9 +516,11 @@ GROUP BY
 
 We must make sure this block find its way to disk, sooner or later, or we may lose data.
 
-## Writing to disk : checkpointer
+## Writing to disk
 
-### Manually
+### in big batches: the checkpointer
+
+#### Manually
 
 We can force writing the block to disk.
 ```postgresql
@@ -504,9 +543,9 @@ GROUP BY
     c.relname
 ```
 
-### Automatically
+#### Automatically
 
-#### Periodically
+##### Periodically
 This should be done automatically.
 
 It is done by a background job, called background writer.
@@ -555,7 +594,7 @@ You can reset them.
 SELECT pg_stat_reset_shared('checkpointer')
 ```
 
-#### If much activity
+##### If much activity
 
 The checkpointer is disabled in this database for educative purpose, see [postgresql.conf](../../../../sandbox/configuration/postgresql.conf), section `Checkpointer`.
 
@@ -652,10 +691,9 @@ FROM
 |:----------------|:--------------|:-----------------|:-------------|:------|
 | checkpoint=&gt; | 1             | 0                | 11           | 88 kB |
 
+### In small batches : the background writer
 
-## Writing to disk in the background : Background writer
-
-The background writer does the same job as teh checkpointer, but in much smaller batches.
+The background writer does the same job as the checkpointer, but in much smaller batches.
 
 It is also disabled in this database for educative purpose, see [postgresql.conf](../../../../sandbox/configuration/postgresql.conf), section `Background writer`.
 ```postgresql
@@ -684,7 +722,7 @@ Reset
 SELECT pg_stat_reset_shared('bgwriter')
 ```
 
-## Writing to disk in emergency : Backend client
+### in emergency : the backend client
 
 If the background writer and the checkpointer cannot handle the situation, we still didn't want to block queries.
 If a query need a block, which is not in the cache, a cache block should be evicted.

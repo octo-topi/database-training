@@ -309,7 +309,7 @@ How many rows ? Check `pg_stat_user_tables`
 ```postgresql
 SELECT
     stt.relname                        table_name
-   ,stt.n_live_tup                    row_count
+   ,stt.n_live_tup                     row_count
 FROM pg_stat_user_tables stt
 WHERE 1=1
    AND relname = 'mytable'
@@ -571,7 +571,7 @@ The [native solution](https://github.com/pgexperts/pgx_scripts/blob/master/bloat
 
 A friendlier solution is to use an extension.
 ```postgresql
-CREATE EXTENSION pgstattuple;
+CREATE EXTENSION IF NOT EXISTS pgstattuple;
 ```
 ```postgresql
 SELECT
@@ -580,6 +580,7 @@ SELECT
     pg_size_pretty(free_space)      unused_size,
     pg_size_pretty(table_len)       total_size
 FROM pgstattuple('mytable')    
+--n todo: is it due to estumations ?
 ```
 
 You can see unused size is 344MB
@@ -598,6 +599,11 @@ Check size
 SELECT pg_size_pretty(pg_table_size('mytable'))  table_size
 ```
 72 kB
+
+
+You will need twice the space during the operation, check the warnings below
+
+Reference: PostgreSQL Internals, Part I - Isolation and MVCC / Rebuilding Tables and Indexes / Full vacuuming
 
 ## Empty the table
 
@@ -624,17 +630,26 @@ SELECT
      ,stt.n_tup_ins                     insert_count
      ,stt.n_tup_upd + stt.n_tup_hot_upd update_count
      ,stt.n_tup_del                     delete_count
-     ,stt.last_seq_scan                 last_read
+     ,stt.last_seq_scan                 last_read_date
      ,stt.seq_tup_read                  rows_read_count
 --,stt.*
 FROM pg_stat_user_tables stt
 WHERE 1=1
   AND relname = 'mytable'
 ;
-``` 
+```
 
-If you need it, you can reset these stats
+If you need it, you can reset the stats on the table usage.
 ```postgresql
 SELECT pg_stat_reset_single_table_counters('mytable'::regclass);
 ```
 
+And, last but not least, let's drop the table.
+```postgresql
+DROP TABLE mytable;
+```
+
+Check the storage: the file is still there, but empty.
+```postgresql
+-rw------- 1 postgres postgres 0 Mar  4 16:26 base/16384/16537
+```

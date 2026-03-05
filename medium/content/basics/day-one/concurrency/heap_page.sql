@@ -1,3 +1,4 @@
+-- TODO: execute it on instance startup
 CREATE EXTENSION pageinspect;
 
 CREATE FUNCTION heap_page(relname text, pageno integer)
