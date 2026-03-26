@@ -20,6 +20,9 @@ restart:
     just stop
     just start
 
+remove-volume:
+    just stop && docker volume rm postgresql_data
+
 console:
     psql --dbname "$CONNECTION_STRING_FLIGHT"
 
@@ -32,11 +35,14 @@ shell:
 logs:
     docker logs --follow $CONTAINER_NAME
 
-clean:
-    docker compose down --volumes
-
 pgactivity:
     pg_activity "$CONNECTION_STRING_FLIGHT"
 
 pgbench:
     time --format='Elapsed: %e seconds ' pgbench --protocol=extended --connect --client=20 --jobs=4 --transactions=200 --no-vacuum --progress=5 --file=./queries/simple.sql
+
+generate-activity:
+    pgbench --client=10 --transactions=100 --no-vacuum --progress=5 --file=./queries/activity-flights.sql
+
+running-queries:
+    psql --dbname "$CONNECTION_STRING_FLIGHT" --file=./queries/running-queries.sql

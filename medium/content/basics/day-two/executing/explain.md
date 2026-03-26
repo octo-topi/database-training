@@ -120,7 +120,7 @@ Add many rows: 10 million (last 40 seconds)
 ```postgresql
 INSERT INTO mytable (id)
 SELECT 2
-FROM generate_series(1, 10000000) AS n;
+FROM generate_series(1, 10_000_000) AS n;
 
 ANALYZE mytable;
 ```
@@ -182,7 +182,7 @@ Add data (10 million - 40 seconds)
 ```postgresql
 INSERT INTO mytable (id)
 SELECT 2
-FROM generate_series(1, 10000000) AS n;
+FROM generate_series(1, 10_000_000) AS n;
 ```
 
 Query table

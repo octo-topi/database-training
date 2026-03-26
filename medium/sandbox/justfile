@@ -35,7 +35,7 @@ stats:
     docker stats
 
 pgbench:
-    time --format='Elapsed: %e seconds ' pgbench --connect --client=20 --transactions=10 --no-vacuum --progress=5 --file=./queries/simple.sql
+    time --format='Elapsed: %e seconds ' pgbench  --client=20 --transactions=10 --no-vacuum --progress=5 --file=./queries/simple.sql
 
 terminate-backends:
     psql --dbname "$CONNECTION_STRING" --command="SELECT pg_cancel_backend(pid) FROM pg_stat_activity WHERE state = 'active' and pid <> pg_backend_pid()";

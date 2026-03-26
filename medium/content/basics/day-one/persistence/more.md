@@ -1,7 +1,6 @@
-# More on storage
+# More
 
-
-## Storage overhead 
+## storage overhead 
 
 How much space is used for actual data ?
 What is the storage overhead ? We saw there is much overhead for an empty block.
@@ -171,9 +170,6 @@ SELECT TRUNC(3925 / 8192 ::NUMERIC * 100) || ' %'
 ```
 47 %
 
-
-
-
 ## random or sequential access
 
 ### heap or index ?
@@ -237,3 +233,36 @@ You'll get the block span
     25165824  692322304  692355071      32768
 (..)
 ```
+## TOAST 
+
+TOAST table looks like a regular table, but it's hidden.
+
+Get toast table name 
+```postgresql
+SELECT toast.relname
+FROM pg_class heap 
+    INNER JOIN pg_class toast ON heap.reltoastrelid = toast.oid
+WHERE 1=1
+  AND heap.relkind = 'r'
+  AND heap.relname = 'tickets'
+  AND toast.relkind = 't'
+;  
+```
+pg_toast_16474
+
+Access
+```postgresql
+SELECT * FROM pg_toast.pg_toast_16474
+```
+
+## more storage tricks
+
+NULL values are not stored as a special character.
+They are stored in a bit map in the row itself: for each column, the bit it 1 if the property is NULL.
+
+Fixed-size field may be stored using more space than expected because of memory alignment requested by hardware.
+You can find by how much [here](https://www.cybertec-postgresql.com/en/type-alignment-padding-bytes-no-space-waste-in-postgresql/).
+
+If you still want to know more, read :
+- [Hironobu SUZUKI](https://www.interdb.jp/pg/pgsql01/03.html)
+- PostgreSQL Internals, Part I - Isolation and MVCC - Pages and Tuples / Page structure

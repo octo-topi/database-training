@@ -52,7 +52,7 @@ FROM pg_class c
          INNER JOIN pg_database d  ON (b.reldatabase = d.oid AND d.datname = current_database())
 WHERE 1=1
 --    AND c.relname NOT LIKE 'pg_%'
-  AND c.relname = 'mytable';
+  AND c.relname LIKE 'mytable%';
 
 -- SELECT pg_buffercache_evict(1011);
 ```

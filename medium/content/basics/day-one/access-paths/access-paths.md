@@ -2,7 +2,7 @@
 
 As more and more data made their way into your system, you should think about scalability.
 
-Sequential scan complexity is O(n)
+Sequential scan complexity is O(n).
 
 How can we keep execution time constant :
 - depending on only of the size of the result set;
@@ -10,14 +10,13 @@ How can we keep execution time constant :
 
 ## Read data more quickly
 
-
 ### Parallel sequential scan
 
 Use several CPU and devices if any.
 
 You need to change instance configurations :
-- several CPU in [.envrc](../../../sandbox/.envrc);
-- set `max_parallel_workers*` settings in [postgresql.conf](../../../sandbox/configuration/postgresql.conf). 
+- several CPU in [.envrc](../../../../sandbox/.envrc);
+- set `max_parallel_workers*` settings in [postgresql.conf](../../../../sandbox/configuration/postgresql.conf). 
 
 Eg, for 10 CPU using [pgtune](https://pgtune.leopard.in.ua/?dbVersion=17&osType=linux&dbType=web&cpuNum=10&totalMemory=500&totalMemoryUnit=MB&connectionNum=&hdType=ssd)
 ```text
@@ -50,7 +49,6 @@ FROM mytable
 WHERE id = 1
 ```
 
-
 It is not parallelized
 ```text
 | QUERY PLAN |
@@ -70,7 +68,7 @@ Insert data
 ```postgresql
 INSERT INTO mytable (id)
 SELECT n
-FROM generate_series(1, 10000000) AS n;
+FROM generate_series(1, 10_000_000) AS n;
 
 ANALYZE mytable;
 ```
@@ -103,8 +101,6 @@ It is parallelized
 | Planning Time: 1.063 ms |
 | Execution Time: 108.113 ms |
 ```
-
-
 
 ### Read the same table for several queries
 
@@ -170,6 +166,90 @@ However, if this has not been done by design at the very start, it can lead to m
 
 ### Partitions
 
+By storing data in different file (segregation), we can avoid reading data we don't need.
+
+This can be achieved :  
+- applicatively (e.g. storing orders to deliver in one table, and delivered one in another table).
+- natively in PostgreSQL using a partition.
+
+Indexes on partitions are smaller, and can then fit into the cache.
+
+The drawback of partitions is related to the partition key: 
+- you can't change the partition key (unless re-creating the table);
+- the access can be slower if you fetch records from more than one partition.
+
+```postgresql
+DROP TABLE IF EXISTS mytable ;
+
+CREATE TABLE mytable (
+    id  integer
+) PARTITION BY RANGE(id)
+;
+
+CREATE TABLE mytable_less_than_million PARTITION OF mytable FOR VALUES FROM (1) TO (1_000_000);
+CREATE TABLE mytable_more_than_million PARTITION OF mytable FOR VALUES FROM (1_000_000) TO (MAXVALUE);
+
+INSERT INTO mytable (id)
+SELECT n
+FROM generate_series(1, 10_000_000) AS n;
+
+ANALYZE mytable;
+```
+
+Let's check there is a file per partition.
+```postgresql
+SELECT 
+    pg_size_pretty(pg_table_size('mytable')) root,
+    pg_size_pretty(pg_table_size('mytable_less_than_million')) partition_one,
+    pg_size_pretty(pg_table_size('mytable_more_than_million')) partition_two
+```
+
+Indeed, and the second one is ten times larger than the first one.
+
+| root    | partition\_one | partition\_two |
+|:--------|:---------------|:---------------|
+| 0 bytes | 35 MB          | 311 MB         |
+
+
+Let's query
+```postgresql
+EXPLAIN 
+SELECT * FROM mytable WHERE id < 1_000_000
+```
+
+We see that `mytable_less_than_million` table is scanned.
+```text
+| QUERY PLAN |
+| :--- |
+| Seq Scan on mytable\_less\_than\_million mytable  \(cost=0.00..16924.99 rows=999899 width=4\) |
+|   Filter: \(id &lt; 1000000\) |
+```
+
+Let's compare to a unpartitioned table.
+```postgresql
+SET ENABLE_PARTITION_PRUNING TO OFF;
+
+EXPLAIN 
+SELECT * FROM mytable WHERE id < 1_000_000
+```
+
+We have
+```text
+| QUERY PLAN |
+| :--- |
+| Append  \(cost=0.00..174251.57 rows=1000799 width=4\) |
+|   -&gt;  Seq Scan on mytable\_less\_than\_million mytable\_1  \(cost=0.00..16924.99 rows=999899 width=4\) |
+|         Filter: \(id &lt; 1000000\) |
+|   -&gt;  Seq Scan on mytable\_more\_than\_million mytable\_2  \(cost=0.00..152322.59 rows=900 width=4\) |
+|         Filter: \(id &lt; 1000000\) |
+```
+
+Let's delete them
+```postgresql
+DROP TABLE IF EXISTS mytable_less_than_million;
+DROP TABLE IF EXISTS mytable_more_than_million;
+DROP TABLE IF EXISTS mytable;
+```
 
 ### Indexes
 

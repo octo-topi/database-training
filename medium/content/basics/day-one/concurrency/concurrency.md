@@ -1,10 +1,14 @@
-# Locks
+# concurrency
 
-## Theory
+## overview
 
-Isolation levels are not the only feature to control concurrency.
+Concurrency is not only about isolation levels, lock are another feature.
 
-Lock are another feature.
+TOOD: Add ACID properties.
+
+## locks
+
+### theory
 
 In "Read commited" isolation level
 
@@ -19,6 +23,6 @@ In PostgreSQL
 - writer don't block reader
 - reader don't block writer
 
-## Find out locks
+### find out locks
 
 [A blog entry](https://blog.octo.com/7-things-a-developer-should-know-about-databases)

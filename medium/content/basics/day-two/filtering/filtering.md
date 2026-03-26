@@ -174,12 +174,7 @@ ANALYZE mytable;
 Now query the stats.
 ```postgresql
 SELECT
-     s.avg_width         size_bytes
-    ,s.n_distinct        distinct_values
-    ,s.most_common_vals  most_common_values_count
-    ,s.most_common_freqs most_common_values_frequency
-     ,TRUNC(s.null_frac * 100) || '%'  null_ratio 
-    --,s.*
+  s.*
 FROM pg_stats s
 WHERE 1=1
     AND s.tablename = 'mytable'
@@ -380,7 +375,7 @@ SELECT
 FROM pg_stats s
 WHERE 1=1
     AND s.tablename = 'mytable'
-    AND s.attname = 'id'
+    AND s.attname = 'code'
 ```
 
 | size\_bytes | distinct\_values | histogram\_bounds                                     | bucket\_count |

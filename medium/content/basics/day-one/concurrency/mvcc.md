@@ -84,7 +84,7 @@ VACUUM VERBOSE mytable;
 
 INSERT INTO mytable (id)
 SELECT n
-FROM generate_series(1, 10000000) AS n;
+FROM generate_series(1, 10_000_000) AS n;
 ```
 
 The file on disk hasn't grown.
@@ -108,7 +108,7 @@ CREATE TABLE mytable (
 
 INSERT INTO mytable (id)
 SELECT n
-FROM generate_series(1, 10000000) AS n;
+FROM generate_series(1, 10_000_000) AS n;
 ```
 
 Open two clients side-by-side
@@ -148,35 +148,23 @@ SELECT n
 FROM generate_series(1, 10_000_000) AS n;
 ```
 
-Check size on disk
-
-Find its physical location
+Check the table size. 
 ```postgresql
-SELECT pg_relation_filepath('mytable')
-FROM pg_settings WHERE name = 'data_directory';
+SELECT pg_size_pretty(pg_table_size('mytable')) 
 ```
-base/16384/16450
+346M
 
-
-Get file size
-```shell
-just storage
-du -sh base/16384/16450
-```
-346M	base/16384/16450
-
-Now, let's update them
+Now, let's update them.
 ```postgresql
 UPDATE mytable
 SET id = -1 * id
 ```
 
-What is the file size ?
-```shell
-just storage
-du -sh base/16384/16450
+What is the table size ?
+```postgresql
+SELECT pg_size_pretty(pg_table_size('mytable')) 
 ```
-692M	base/16384/16450
+692M
 
 Look like the update has created as many rows as it updated !
 
@@ -255,8 +243,9 @@ PostgreSQL keep track of:
 
 This operation should be performed each time a block is read, and all blocks should be read in a sequential scan.
 
+### Displaying row versions and version metadata
 
-### Displaying row versions and hint bits
+Let's see the version metadata.
 
 ```postgresql
 ROLLBACK;
@@ -267,161 +256,93 @@ CREATE TABLE mytable (
 ) WITH (AUTOVACUUM_ENABLED = FALSE);
 ```
 
-
-Insert a first row
+Insert a first row.
 ```postgresql
 BEGIN TRANSACTION;
+
 SELECT pg_current_xact_id();
 --859
 INSERT INTO mytable(id) VALUES (0);
 
-SELECT * FROM heap_page('mytable', 0);
-
 COMMIT;
-
-SELECT * FROM heap_page('mytable', 0);
 ```
-| ctid    | state  | xmin | xmax |
-|:--------|:-------|:-----|:-----|
-| \(0,1\) | normal | 859  | 0 a  |
 
-Update it
+xmin and xmax are available out-of-the-box.
+```postgresql
+SELECT t.ctid, t.xmin, t.xmax FROM mytable t;
+```
+
+| ctid    | xmin | xmax |
+|:--------|------|:-----|
+| \(0,1\) | 859  | 0    |
+
+
+Update the row
 ```postgresql
 BEGIN TRANSACTION;
+
 SELECT pg_current_xact_id();
 --860
+
 UPDATE mytable SET id=1 WHERE id=0;
+
 COMMIT;
-SELECT * FROM heap_page('mytable', 0);
-```
-| ctid    | state  | xmin  | xmax |
-|:--------|:-------|:------|:-----|
-| \(0,1\) | normal | 859 c | 860  |
-| \(0,2\) | normal | 860   | 0 a  |
+``` 
 
-
-Let's access the table
+We can only see the new version.
 ```postgresql
-SELECT *
-FROM mytable
+SELECT t.ctid, t.xmin, t.xmax FROM mytable t;
 ```
 
-Pattern cache "stale while revalidate"
+| ctid    | xmin | xmax |
+|:--------|:-----|:-----|
+| \(0,2\) | 860  | 0 a  |
 
-The hint bits have been set
+
+To see the old version, we'll use `pageinspect` extension.
 ```postgresql
-SELECT * FROM heap_page('mytable', 0);
+SELECT 
+  t.t_ctid, t.t_xmin, t.t_xmax,t.*
+FROM heap_page_items(get_raw_page('mytable', 0)) t
 ```
 
-| ctid    | state  | xmin  | xmax  |
-|:--------|:-------|:------|:------|
-| \(0,1\) | normal | 859 c | 860 c |
-| \(0,2\) | normal | 860 c | 0 a   |
+Now you can see both of them.
+
+| ctid    | xmin | xmax |
+|:--------|:-----|:-----|
+| \(0,1\) | 859  | 860  |
+| \(0,2\) | 860  | 0    |
 
 
-## Optimizations
-
-There is therefore many optimization to skip it:
-- the first time the row is read:
-   - the status of the transaction for xmin and xmax are stored in the row header;
-   - if the row is visible to all transactions, a flag is set on row header;
-- when a vacuum is executed, if all rows in a block are visible to all transactions, the block is written in the visibility map, which is a separate file.
+## What does commit and rollback do ?
 
 We can understand now that MVCC is optimized to write data change quickly:
 - changes of table data are written immediately to fs, not waiting for COMMIT;
 - to COMMIT, the transaction set a bit in the CLOG;
 - to ROLLBACK, the transaction set a bit in the CLOG.
 
-### Setting hint bits in row version on SELECT
+This view is simplified, but will get more accurate in the cache and resilience section.
 
-Reading a table just after inserting data will cause all blocks which are accessed for the first time to be updated on hint bits. As writing happens on whole block, much I/O will be used. This is the price to pay for fast COMMIT : data is written two times.
-
-This strategy is efficient if you write one time, read many times.
-If you create a row, update it frequently, and read it seldomly, you will spend much time writing.
-
-Let's demonstrate this.
-
-````postgresql
-CHECKPOINT;
-TRUNCATE TABLE mytable
-````
-
-Monitor you disk I/O
-```shell
-iostat --human 10 | awk 'BEGIN {print "Size(R - W)"} /$DEVICE/  {print $6  " - " $7}'
-```
-
-Add many rows: 10 million (last 4 seconds)
-```postgresql
-INSERT INTO mytable (id)
-SELECT n
-FROM generate_series(1, 10000000) AS n;
-```
-
-What's table size ?
-```postgresql
-SELECT pg_size_pretty(pg_table_size('mytable'))  table_size
-```
-346 MB
-
-You get a lot of writes, which is expected.
-But why 1GB, more than table size ?
-Because, at least, of WAL files.
-```text
-Size(R - W)
-0,0k - 3,8M
-14,0M - 1,3G
-156,0k - 20,8M
-```
-
-Now access all rows
-```postgresql
-SELECT COUNT(*)
-FROM mytable
-```
-
-You've got as much write than read (220Mb), this is about setting hint bits.
-```text
-Size(R - W)
-108,0k - 4,6M
-222,1M - 224,7M
-0,0k - 3,2M
-```
-If you wonder why all rows have not been written (346 - 220 = 122)
-Try this
-
-```postgresql
-CHECKPOINT;
-```
-
-The missing 122 Mb are written.
-```text
-0,0k - 6,3M
-0,0k - 126,5M
-0,0k - 2,3M
-```
-
-If you wonder why no WAL files have been written, this is a configuration. 
-HInt bits information is not critical.
-
-```postgresql
-SHOW wal_log_hints
-```
-
-[wal_long_hints](https://www.postgresql.org/docs/current/runtime-config-wal.html#GUC-WAL-LOG-HINTS)
-
-Reference: PostgreSQL Internals, Part I - Isolation and MVCC / Page and tuples / Operations on tuples / Commit
-
-## Beware of long-running transaction
+## Make the way for auto-vacuum : long-running transaction
 
 You saw in the persistence chapter than VACUUM is useful for deleted rows.
-Now you understand why vacuum do much more than this: vacuum free space used by obsolete versions of a row.
-A row should not be kept when it has been deleted, but an update in PostgreSQL render a row version obsolete.
-If you update a row many times, several time between vacuum, the table will grow steadily, which you may want to avoid. 
+Maybe you understand that VACUUM does much more than that. He free space used by obsolete versions of a row, versions that nobody can see anymore.
 
-Until now, we only dealt with one table, but transaction encompass all tables.
+A row should not be kept when it has been deleted : this is clear for all database.
+When a row is updated, its old version should not be kept : this is relevant only to PostgreSQL.
 
-At higher isolation level than default, consistency is extended beyond the duration of a single statement and encompass the whole transaction.Therefore, even rows that have been deleted on table T by a commited transaction should be kept for another still-running transaction, which may access T in the future. That means vacuuming is deffered until this transaction ends.
+The worst case is when you update a row many times, in consecutive commited transactions.
+
+The table will grow steadily, which is not desirable:
+- you may not afford the extra storage;
+- this will make the table sequential read longer.
+
+To avoid this, you set up your auto-vacuum, but he may not be able to recover space.
+Why is that so ? Because he can't clean up row version that are still visible to running transaction.
+
+Until now, we only dealt with one table. Transaction encompass all tables.
+
+At higher isolation level than default, consistency is extended beyond the duration of a single statement and encompass the whole transaction. Therefore, even rows that have been deleted on table T by a commited transaction should be kept for another still-running transaction, which may access T in the future. That means vacuuming is deffered until this transaction ends.
 
 At the worst, if the transaction keep on for hours or days, the database may allocate more and more disk space, only to handle updates.
 
