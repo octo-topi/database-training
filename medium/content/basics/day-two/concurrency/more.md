@@ -49,7 +49,7 @@ Let's demonstrate this.
 First, empty the table.
 ````postgresql
 CHECKPOINT;
-TRUNCATE TABLE mytable
+TRUNCATE TABLE mytable;
 ````
 
 Start monitoring you disk I/O

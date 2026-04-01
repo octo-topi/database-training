@@ -11,4 +11,4 @@ WHERE 1=1
   AND ssn.pid <>  pg_backend_pid()
   AND state <> 'idle'
 ;
-\watch 0,5
+\watch 1

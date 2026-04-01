@@ -1,22 +1,53 @@
 # Costs
 
-## Table access (in cache)
+## Table access
 
 ### Sequential scan
+
+Let's start again with our table.
+```postgresql
+DROP TABLE IF EXISTS mytable;
+
+CREATE TABLE mytable (
+    id  integer
+) WITH (AUTOVACUUM_ENABLED = FALSE);
+
+
+INSERT INTO mytable (id)
+SELECT n
+FROM generate_series(1, 10_000_000) AS n;
+```
+
 
 Q: What happens when reading a whole table ?
 
 A : The following:
-- read all table blocks from cache
+- read all table blocks
 - for each block:
   - access each row using tuple pointer
-  - for each tuple, check if it visible
-  - if yes, return it 
+  - for each tuple
+    - decode metadata 
+    - check metadata to knbow if it is visible
+    - if yes, decode its content and return it
+    - if no, skip it
 
+We also ask PostgreSQL what's its plan.  
+```postgresql
+EXPLAIN
+SELECT *
+FROM mytable
+```
+
+Seq Scan on mytable  (cost=0.00..14425.00 rows=1000000 width=4)
+
+The plan returns:
+- a cost;
+- expected row count;
+- expected row length.
+
+We'll see how ito compute this.
 
 #### Read buffers
-
-As we cannot know if the block will be in the cache, PostgreSQL assume that it will have to read it from the disk.
 
 The cost of this operation, named `seq_page_cost`, is assigned the arbitrary value 1.
 It is taken as the reference for all other costs' parameter.
@@ -25,15 +56,15 @@ SHOW seq_page_cost
 ```
 1
 
-
 #### Get rows from buffers
 
-We can know how any rows there are in each block ... if we read the block and check the item pointer.
+We can know how any rows there are in each block ... unless we read the block and check the item pointer.
 We don't want to do that - we'll rely on the row count from the stats.
 
 Applying an operator to a row has a cost named `cpu_tuple_cost` which is 1/100 of `seq_page_cost`.
 ```postgresql
-SHOW cpu_tuple_cost
+SHOW cpu_tuple_cost;
+SELECT current_setting('seq_page_cost')
 ```
 0.01
 
@@ -59,11 +90,12 @@ SELECT COUNT(*) FROM mytable;
 SELECT * FROM mytable;
 ```
 
+TODO: add metrics proxy
 
 What is the estimated cost ? 
 ```postgresql
 EXPLAIN 
-SELECT * FROM mytable
+SELECT id FROM mytable
 ```
 
 ```text
@@ -79,8 +111,7 @@ WITH read_block AS (
     SELECT 
         current_setting('seq_page_cost') one_block,
         c.relpages * current_setting('seq_page_cost')::DECIMAL whole_file
-    FROM pg_class c
-        JOIN pg_stats s ON s.tablename = c.relname
+    FROM pg_class c       
     WHERE c.relname = 'mytable'
         ), 
    decode_block AS (
@@ -88,7 +119,6 @@ WITH read_block AS (
         current_setting('cpu_tuple_cost') one_row,
         c.reltuples * current_setting('cpu_tuple_cost')::DECIMAL whole_table
     FROM pg_class c
-        JOIN pg_stats s ON s.tablename = c.relname
     WHERE c.relname = 'mytable'       
 ) 
 SELECT 
@@ -101,6 +131,32 @@ SELECT
 FROM read_block r, decode_block f 
 ```
 
+Now, are our estimations accurate ?
+
+We can ask Postgresql to track the actual figures:
+- actual cost = time
+- actual row count
+
+To do this, we use `ANALYZE` keyword. 
+
+```postgresql
+EXPLAIN ANALYZE
+SELECT id FROM mytable
+```
+
+| QUERY PLAN                                                                                                              |
+|:------------------------------------------------------------------------------------------------------------------------|
+| Seq Scan on mytable  \(cost=0.00..14425.00 rows=1000000 width=4\) \(actual time=0.021..33.372 rows=1000000.00 loops=1\) |
+| Planning Time: 0.038 ms                                                                                                 |
+| Execution Time: 53.609 ms                                                                                               |
+
+Let's see:
+- expected cost = 14 425; actual time = 53 ms
+- expected row count = 1 000 000; actual row count = 1 000 000
+
+The figures match.
+
+To read execution plan, see [the dedicated section](../executing/explain.md).
 
 #### Does it scale ?
 
@@ -108,6 +164,8 @@ Q: Can sequential scan be pipelined ? Does it scale ?
 
 A: Yes, we can read a bunch or rows, return them to the client, and process another batch.
 It scales, its complexity is O(n).
+
+TODO: add there is no way to ask PG if it is pipelibeable
 
 ### Table direct access
 
@@ -117,7 +175,21 @@ EXPLAIN
 SELECT * FROM mytable WHERE ctid = '(0,1)'
 ```
 
+| QUERY PLAN                                              |
+|:--------------------------------------------------------|
+| Tid Scan on mytable  \(cost=0.00..1.11 rows=1 width=4\) |
+| TID Cond: \(ctid = '\(0,1\)'::tid\)                     |
+
+
+TODO: find the associated cost
+```postgresql
+SHOW *_cost 
+```
+
+
 ### Table random access
+
+TODO : move this in index part
 
 You can only get it using an index.
 
@@ -128,9 +200,7 @@ SHOW random_page_cost
 What is the estimated cost ? 
 ```postgresql
 EXPLAIN 
-
 ```
-
 
 > Random access to durable storage is normally much more expensive than four times sequential access. However, a lower default is used (4.0) because the majority of random accesses to storage, such as indexed reads, are assumed to be in cache. Also, the latency of network-attached storage tends to reduce the relative overhead of random access.
 
@@ -139,28 +209,25 @@ EXPLAIN
 [Reference](https://www.postgresql.org/docs/current/runtime-config-query.html)
 
 
-## Other operations (in private process memory)
+## In private process memory
 
 ### Filter
 
-Q: What happens when reading a whole table with a filter?
+Q: What happens when reading a whole table with a filter ?
 A : The same as in sequential table scan, add then a filter is applied
 
 Q: Where does this happens ? In which memory ?
-A: Buffer from seq scan are stored in shared_buffers, filtered rows are stored in the backend process memory.
+A: Filtered rows are stored in the backend process memory.
 
-#### Filter
+#### Cost
 
-As we saw in [filtering](../filtering), we can estimate how many rows we will get.
-However, we want here the cost of the operation: all visible rows will have to be filtered. 
+To filter, all rows will have to be read, including those that will be filtered out.  
 
 Applying an operator to a row has a cost named `cpu_operator_cost` which is 1/400 of `seq_page_cost`.
 ```postgresql
 SHOW cpu_operator_cost
 ```
 0.0025
-
-#### Sum up
 
 Let's create a table.
 ```postgresql
@@ -190,15 +257,17 @@ What is the cost for scan ?
 EXPLAIN 
 SELECT * FROM mytable
 ```
-28 850
+28 850, 2 000 000 rows expected
+
+TOOD: add if rows are filtered coming out of cache, by whom, is memory limited to filter or to store (materialize) 
 
 What is the cost for scan and filter ?
 ```postgresql
-EXPLAIN ANALYZE
+EXPLAIN
 SELECT * FROM mytable
 WHERE id = 2
 ```
-33 850
+33 850, 995 000 rows expected
 
 Let's compute it ourselves.
 ```postgresql
@@ -208,7 +277,6 @@ WITH
         current_setting('seq_page_cost') one_block,
         c.relpages * current_setting('seq_page_cost')::DECIMAL whole_file
     FROM pg_class c
-        JOIN pg_stats s ON s.tablename = c.relname
     WHERE c.relname = 'mytable'
         ), 
    decode_block AS (
@@ -216,7 +284,6 @@ WITH
         current_setting('cpu_tuple_cost') one_row,
         c.reltuples * current_setting('cpu_tuple_cost')::DECIMAL whole_table
     FROM pg_class c
-        JOIN pg_stats s ON s.tablename = c.relname
     WHERE c.relname = 'mytable'),
     filter_rows AS (
     SELECT 
@@ -240,6 +307,24 @@ FROM read_block r, decode_block d, filter_rows f
 The costs match.
 
 
+Let's see if the plan is accurate.
+```postgresql
+EXPLAIN ANALYZE
+SELECT * FROM mytable
+WHERE id = 2
+```
+
+| QUERY PLAN                                                                                                              |
+|:------------------------------------------------------------------------------------------------------------------------|
+| Seq Scan on mytable  \(cost=0.00..33850.00 rows=995000 width=4\) \(actual time=34.145..78.031 rows=1000000.00 loops=1\) |
+| Filter: \(id = 2\)                                                                                                      |
+| Rows Removed by Filter: 1000000                                                                                         |
+
+
+We seee the plan is accurate: row count: 995 000 expected, actual 1 000 000.
+We also see the rows removed by filter: 1 000 000. They were hidden in the first plan, only the rows kept were displayed.
+
+
 #### Does it scale ?
 
 Q: Can filter on seq scan be pipelined ? Does it scale ?
@@ -247,8 +332,13 @@ Q: Can filter on seq scan be pipelined ? Does it scale ?
 A: Yes, the filter itself can be pipelined, and is operating on a pipelined operation, seq scan. 
 It scales, its complexity is O(n).
 
+#### How does the expected rows come ?
 
-### Data transform
+To estimate how many rows we will get, we need data statistics.
+There is a whole [section](../filtering/filtering.md) on this.
+
+
+### Data transform - On a row
 
 If your query keep the table column as is, no work has to be done.
 But if you change it in any way, there is some work, and each work has a cost. 
@@ -370,7 +460,9 @@ Seq Scan on mytable  (cost=0.00..14425.00 rows=1000000 width=40)
 Therefore, you may get different execution time for the same cost.
 If query many big columns, you'll have to store them in memory - and if you run out of memory, you'll use temp file on fs, which are slower.
 
-### Using many rows
+### On several rows - Aggregate
+
+#### Costs
 
 Till now, we saw data transform on each row.
 
@@ -412,6 +504,8 @@ A: All can be pipelined, there is no need to get all rows first, and then to app
 
 ### Sorting
 
+#### Costs
+
 Sorting does not transform rows, but there is work to do, and each work has its cost.
 
 ```postgresql
@@ -429,7 +523,7 @@ Sort  (cost=138110.89..140610.89 rows=1000000 width=4)
   ->  Seq Scan on mytable  (cost=0.00..14425.00 rows=1000000 width=4)
 ```
 
-The total cost is Sort  140 610, the sort cost is
+The total cost `140 610`, the sort cost is
 ```postgresql
 SELECT 140_610 - 14_425
 ```
@@ -461,6 +555,24 @@ Their complexity is O(n log n).
 
 Reference: PostgreSQL Internals, Part IV - Query execution - Sorting and merging / Sorting
 
-## More
+### Join table
 
-Table seq scan nitty-gritty cost calculations are available in [Hironobu Suzuki](https://www.interdb.jp/pg/pgsql03/02.html).
+Joining table essentially relies on matching between two sets.
+Usually, matching is performed using equality operator.
+
+
+PostgreSQL can use 3 algorithms:
+- nested loop
+- hash join
+- merge join
+
+Some algorithm can be performed in memory, other on disk.
+They may require an ordered dataset.
+
+The selection between these algorithms depends on:
+- data set size;
+- matching operator selectivity.
+
+TODO: add cost
+
+Therefore, up-to-date statistics are crucial.

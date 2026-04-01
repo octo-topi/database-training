@@ -62,8 +62,8 @@ ANALYZE VERBOSE mytable;
 
 We use `ORDER BY` in combination with `SUM` to prevent pipelined execution. 
 ```postgresql
-SELECT SUM(id)
-FROM (SELECT id FROM mytable ORDER BY id DESC)
+SELECT MAX(id)
+FROM (SELECT id FROM mytable ORDER BY id DESC);
 ```
 
 Check the logs to see what happened.
@@ -76,6 +76,39 @@ You see a temp file has been generated.
 2026-02-03 14:31:19.382 GMT [154864] LOG:  temporary file: path "base/pgsql_tmp/pgsql_tmp154864.1", size 12066816
 ```
 
+You can use `ANALYZE` to get the figures the query
+```postgresql
+EXPLAIN ANALYZE
+SELECT MAX(id)
+FROM (SELECT id FROM mytable ORDER BY id DESC);
+```
+
+We output is rather long.
+```text
+Aggregate  (cost=143110.89..143110.90 rows=1 width=4) (actual time=257.192..257.195 rows=1.00 loops=1)
+"  Buffers: shared hit=4425, temp read=4414 written=4452"
+  I/O Timings: temp read=7.022 write=8.622
+  ->  Sort  (cost=138110.89..140610.89 rows=1000000 width=4) (actual time=153.684..198.015 rows=1000000.00 loops=1)
+        Sort Key: mytable.id DESC
+        Sort Method: external merge  Disk: 11784kB
+"        Buffers: shared hit=4425, temp read=4414 written=4452"
+        I/O Timings: temp read=7.022 write=8.622
+        ->  Seq Scan on mytable  (cost=0.00..14425.00 rows=1000000 width=4) (actual time=0.016..31.566 rows=1000000.00 loops=1)
+              Buffers: shared hit=4425
+Planning:
+  Buffers: shared hit=4
+Planning Time: 0.141 ms
+Execution Time: 259.720 ms
+```
+
+Now, we can spot the `Sort` node
+```text
+  ->  Sort  (cost=138110.89..140610.89 rows=1000000 width=4) (actual time=153.684..198.015 rows=1000000.00 loops=1)
+        Sort Key: mytable.id DESC
+        Sort Method: external merge  Disk: 11784kB
+```
+It used 11 784 kB of temp file to sort. 
+
 Now, if we give it plenty of memory. 
 ```postgresql
 SET work_mem TO '100MB'
@@ -83,13 +116,39 @@ SET work_mem TO '100MB'
 
 Run the query again.
 ```postgresql
-SELECT SUM(id)
+SELECT MAX(id)
 FROM (SELECT id FROM mytable ORDER BY id DESC)
 ```
 
 There is no more temp logs.
 ```shell
 docker logs postgresql 2>&1 | grep temp
+```
+
+Let's see in detail.
+```postgresql
+EXPLAIN ANALYZE
+SELECT MAX(id)
+FROM (SELECT id FROM mytable ORDER BY id DESC);
+```
+
+```text
+Aggregate  (cost=119082.84..119082.85 rows=1 width=4) (actual time=118.901..118.904 rows=1.00 loops=1)
+  Buffers: shared hit=4425
+  ->  Sort  (cost=114082.84..116582.84 rows=1000000 width=4) (actual time=66.785..90.160 rows=1000000.00 loops=1)
+        Sort Key: mytable.id DESC
+        Sort Method: quicksort  Memory: 24577kB
+        Buffers: shared hit=4425
+        ->  Seq Scan on mytable  (cost=0.00..14425.00 rows=1000000 width=4) (actual time=0.020..32.107 rows=1000000.00 loops=1)
+              Buffers: shared hit=4425
+Planning Time: 0.065 ms
+Execution Time: 118.948 ms
+```
+
+The sort node used 24 MB of memory
+```text
+  ->  Sort  (cost=114082.84..116582.84 rows=1000000 width=4) (actual time=66.785..90.160 rows=1000000.00 loops=1)
+        Sort Method: quicksort  Memory: 24577kB
 ```
 
 Let's restore this setting

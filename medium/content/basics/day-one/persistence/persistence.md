@@ -52,7 +52,7 @@ The only faster method if you only need to write is append-only (hadoop, kafka),
 
 Create a table
 ```postgresql
-DROP TABLE IF EXISTS mytable ;
+DROP TABLE IF EXISTS mytable;
 
 CREATE TABLE mytable (
     id  integer
@@ -154,7 +154,7 @@ All rows are stored in the same file: PostgreSQL is not a column store as in Big
 
 Each rule has its exception, alas, for big row properties, e.g. a JSON of several megabytes.
 
-If you record exceeds 2kb, it will be :
+If you record exceeds 2kb ( 4 rows per block), it will be :
 - compressed (works like magic on natural language);
 - if not enough, stored separately in a TOAST table.
 
@@ -333,8 +333,8 @@ You can query using the pointer, here on block 0, first row.
 SELECT id, ctid
 FROM mytable
 WHERE 1=1
-    AND id = -1
-    AND ctid = '(0,1)'
+   -- AND id = -1
+   -- AND ctid = '(0,1)'
 ```
 
 You can also access pointer fields separately.
@@ -441,8 +441,7 @@ If we want to know the size without looking into the datafile, we can call sever
 ```postgresql
 SELECT 
     pg_table_size('mytable')                            table_size_bytes,
-    pg_size_pretty(pg_table_size('mytable'))            table_size,
-    pg_size_pretty(pg_relation_size('mytable','main'))  table_size
+    pg_size_pretty(pg_table_size('mytable'))            table_size
 ```
 346 MB
 
@@ -557,12 +556,13 @@ ORDER BY pg_relation_size(relid) DESC;
 [Reference](https://www.postgresql.org/docs/current/monitoring-stats.html#MONITORING-PG-STATIO-ALL-TABLES-VIEW)
 
 ### Write activity 
+### Write activity 
 
 Trigger events and check they appear in statistics.
 ```postgresql
 UPDATE mytable 
 SET id = 1
-WHERE id = -1;
+WHERE id = 1;
 ```
 
 Delete a non-existent row
@@ -599,9 +599,32 @@ WHERE 1=1
 
 ### Space cannot be reused for INSERT
 
+```postgresql
+
+DROP TABLE IF EXISTS mytable;
+
+CREATE TABLE mytable (
+    id  integer
+) WITH (AUTOVACUUM_ENABLED = FALSE);
+```
+
+```postgresql
+INSERT INTO mytable (id)
+SELECT n
+FROM generate_series(1, 10_000_000) AS n;
+
+SELECT pg_size_pretty(pg_table_size('mytable'))
+```
+
+
 Delete all rows
 ```postgresql
 DELETE FROM mytable WHERE true
+```
+
+```postgresql
+SELECT *
+FROM mytable;
 ```
 
 Check size
@@ -726,6 +749,13 @@ And mark them for reuse.
 VACUUM VERBOSE mytable;
 ```
 
+Check size
+```postgresql
+SELECT pg_size_pretty(pg_table_size('mytable'))  table_size
+```
+346Mb - TODO: why is it so ?
+
+
 Let's suppose we loaded some table by error.
 You want to give back the space to OS, by example for another table.
 
@@ -791,6 +821,8 @@ It is quicker, and will release the space automatically.
 ```postgresql
 TRUNCATE TABLE mytable
 ```
+
+TODO: can you rollback afterwards ?
 
 Check size on disk: it is now empty
 ```text

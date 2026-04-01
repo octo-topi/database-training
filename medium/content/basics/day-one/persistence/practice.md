@@ -1,8 +1,27 @@
 # Practice
 
+## Fixed-size types
+
+Create a table with the following columns: 
+- one integer;
+- one fixed-size text `CHARACTER($LENGTH)`.
+
+Insert data and find:
+- the row length;
+- how many rows per block.
+
+## Variable-size types
+
+Create another table with variable-size `TEXT` type.
+
+Insert data and find:
+- the row length;
+- how many rows per block.
+
 ## Table content
 
-What is the size of `flights` table ? 
+What is the size of `flights` table ?
+
 How many blocks ? How many rows ?
 
 Get the size of several rows.
@@ -15,7 +34,7 @@ Get the table usage : how many rows have been inserted, updated, selected ?
 
 Generate some activity on the table, not looking at the queries themselves.
 ```shell
-just get-activity
+just generate-activity
 ```
 
 Get its usage again. Which queries have been executed ?
@@ -39,6 +58,9 @@ just pgactivity
 ```
 
 Generate some activity, can you see the queries ?
+```shell
+just generate-activity
+```
 
 Try again with `pg_stat_activity` view
 

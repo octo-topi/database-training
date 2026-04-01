@@ -124,6 +124,7 @@ BEGIN TRANSACTION;
 DELETE FROM mytable WHERE true;
 
 -- Terminal 2
+SELECT * FROM mytable;
 VACUUM VERBOSE mytable;
 ```
 
@@ -302,7 +303,7 @@ SELECT t.ctid, t.xmin, t.xmax FROM mytable t;
 To see the old version, we'll use `pageinspect` extension.
 ```postgresql
 SELECT 
-  t.t_ctid, t.t_xmin, t.t_xmax,t.*
+  t.t_ctid, t.t_xmin, t.t_xmax
 FROM heap_page_items(get_raw_page('mytable', 0)) t
 ```
 
@@ -312,6 +313,15 @@ Now you can see both of them.
 |:--------|:-----|:-----|
 | \(0,1\) | 859  | 860  |
 | \(0,2\) | 860  | 0    |
+
+```postgresql
+SELECT id 
+FROM mytable
+```
+
+```postgresql
+VACUUM mytable
+```
 
 
 ## What does commit and rollback do ?
@@ -447,3 +457,6 @@ WHERE t.relname = 'mytable'
 | 1000000               | 201000       | false    |
 
 [Reference](https://www.postgresql.org/docs/current/routine-vacuuming.html)
+
+TODO: Add TOAST link - as soon as the field is not updated, it can stay the same in the TOAST.
+The idea is that such data are write once, read many, never changed.

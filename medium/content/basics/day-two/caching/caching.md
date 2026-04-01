@@ -11,7 +11,7 @@ This applies to PostgreSQL as well.
 ## OS feature reuse
 
 PostgreSQL use most of the features of the OS :
-- each connection is handled by an OS process;
+- each connection is handled by an OS process; 
 - data is shared between processes using shared memory;
 - processed are sending signals to each other.
 
@@ -40,7 +40,7 @@ Let's suppose the query use a filter.
 ```postgresql
 SELECT *
 FROM mytable
-WHERE id = 1
+WHERE id = 1;
 ```
 
 Q: Should all data from the table go through the OS cache and returned to the database, even thought only one row is needed ?
@@ -88,6 +88,11 @@ CREATE TABLE mytable (
 INSERT INTO mytable (id)
 SELECT n
 FROM generate_series(1, 100_000) AS n;
+
+ANALYSE mytable;
+
+EXPLAIN ANALYSE 
+SELECT * FROm mytable;
 ```
 
 Table size is 3 Mb
@@ -145,6 +150,7 @@ We've got a bunch of systems objects.
 
 Let's filter them out and query our table.
 ```postgresql
+EXPLAIN ANALYZE
 SELECT *
 FROM mytable
 WHERE 1=1
@@ -185,13 +191,14 @@ FROM pg_class c
          INNER JOIN pg_database d ON (b.reldatabase = d.oid AND d.datname = current_database())
 WHERE 1=1
       AND c.relname NOT LIKE 'pg_%'
---     AND c.relname = 'mytable'
+     AND c.relname = 'mytable'
 ```
 
 ### Filter on SELECT
 
 Q: If we do not filter by a physical pointer, what happens ?
 ```postgresql
+EXPLAIN ANALYSE 
 SELECT *
 FROM mytable
 WHERE 1=1

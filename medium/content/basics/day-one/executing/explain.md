@@ -2,20 +2,21 @@
 
 ## Input
 
-What does execution should take into account ?
-- data statistics (row expected, Rows Removed by Filter)
+What does planning take into account ?
+- query predicate
+- access paths
+- index, partitions
+- data statistics (row expected)
+- cache, only for index (hit, dirtied, read)
+
+What does plan execution tracks donw ?
+- data statistics (row actual, Rows Removed by Filter)
 - cache (hit, dirtied, read)
 - wal (wal)
 - mvcc (all_visible => heap fetches=0)
 - index (Recheck Cond)
 
-
-
-
-
 ## Data statistics
-
-
 
 ## How database actually access data ?
 
@@ -101,8 +102,10 @@ $operation on $object  ($expected)                      (actual time=$first_row.
 Seq Scan on mytable    (cost=0.00..1.01 rows=1 width=4) (actual time=0.011..0.013          rows=1          loops=1)
 ```
 
+TODO: why does execution time exceeed actual time ?
+
 So:
-- time      : `0.011` ms for the first row, then `0.013` for all following
+- time      : `0.011` ms for the setup, then `0.013` for all following
 - row count : `1` row was returned from scan
 - loops     : the operation has been done  `1` time
 
@@ -113,8 +116,7 @@ Planning Time: 0.036 ms
 Execution Time: 0.026 ms
 ```
 
-We can see the planning time exceed the access time
-
+We can see the planning time exceed the access time.
 
 Add many rows: 10 million (last 40 seconds)
 ```postgresql
@@ -124,7 +126,6 @@ FROM generate_series(1, 10_000_000) AS n;
 
 ANALYZE mytable;
 ```
-
 
 Run again
 ```postgresql
@@ -142,7 +143,6 @@ Execution Time: 2180.771 ms
 
 The estimation has increased: the cost went from <1 to 44k, because 10 millions rows are expected.
 The execution now last 2 seconds, much more than planning time.  
-
 
 Run again
 ```postgresql
@@ -239,6 +239,8 @@ SELECT id
 FROM mytable
 WHERE id = 1
 ```
+
+
 ## Data distribution
 
 Query-planner statistics
