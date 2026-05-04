@@ -23,7 +23,7 @@ All these methods are documented here:
 - [time, TIMING, db logging](https://github.com/GradedJestRisk/batch-queries-postgresql/blob/main/basic-container-management/implementation/implementation.md#monitor-execution-time)
 - [pg_stat_statements, auto-explain, pgbench](https://github.com/GradedJestRisk/batch-queries-postgresql/blob/main/monitor-execution-time/implementation/implementation.md)
 
-Hint: for WAL concern, see [UNLOGGED table](../day-two/resilience/more.md)
+Hint: for WAL concern, see [UNLOGGED table](resilience/more.md)
 
 Pick the one you can use now.
 

@@ -15,8 +15,8 @@ How can we keep execution time constant :
 Use several CPU and devices if any.
 
 You need to change instance configurations :
-- several CPU in [.envrc](../../../../sandbox/.envrc);
-- set `max_parallel_workers*` settings in [postgresql.conf](../../../../sandbox/configuration/postgresql.conf). 
+- several CPU in [.envrc](../../../../environments/sandbox/.envrc);
+- set `max_parallel_workers*` settings in [postgresql.conf](../../../../environments/sandbox/configuration/postgresql.conf). 
 
 Eg, for 10 CPU using [pgtune](https://pgtune.leopard.in.ua/?dbVersion=17&osType=linux&dbType=web&cpuNum=10&totalMemory=500&totalMemoryUnit=MB&connectionNum=&hdType=ssd)
 ```text

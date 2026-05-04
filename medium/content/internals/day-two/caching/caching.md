@@ -603,7 +603,7 @@ SELECT pg_stat_reset_shared('checkpointer')
 
 ##### If much activity
 
-The checkpointer is disabled in this database for educative purpose, see [postgresql.conf](../../../../sandbox/configuration/postgresql.conf), section `Checkpointer`.
+The checkpointer is disabled in this database for educative purpose, see [postgresql.conf](../../../../environments/sandbox/configuration/postgresql.conf), section `Checkpointer`.
 
 Still, we can trigger a checkpoint manually. 
 ```postgresql
@@ -702,7 +702,7 @@ FROM
 
 The background writer does the same job as the checkpointer, but in much smaller batches.
 
-It is also disabled in this database for educative purpose, see [postgresql.conf](../../../../sandbox/configuration/postgresql.conf), section `Background writer`.
+It is also disabled in this database for educative purpose, see [postgresql.conf](../../../../environments/sandbox/configuration/postgresql.conf), section `Background writer`.
 ```postgresql
 -- Execution frequency
 SHOW bgwriter_delay; 

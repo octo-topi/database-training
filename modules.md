@@ -102,7 +102,7 @@ Creation: 9 days, spent 4.5
 Duration: 6 days
 
 Parts
-- [one : basics - 3 days ](medium/content/basics):
+- [one : basics - 3 days ](medium/content/internals):
   - heap : pro/cons, storage layout (blocks)
   - monitor a query : execution plan, statistics
   - index : pro/cons, storage layout, optimization

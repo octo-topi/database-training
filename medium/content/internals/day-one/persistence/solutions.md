@@ -144,6 +144,103 @@ SELECT
 
 48 kB
 
+
+## JSON type
+
+### Load
+
+Download file.
+```shell
+curl --output content.json https://raw.githubusercontent.com/farskipper/kjv/refs/heads/master/json/verses-1769.json
+```
+
+Remove newline in the file.
+
+Get file size
+```shell
+ls -lh content.json
+```
+4.6 Mb
+
+Load in a table
+```postgresql
+DROP TABLE json;
+CREATE UNLOGGED TABLE json (content JSON);
+
+\copy json from 'content.json'
+
+SELECT content::JSONB FROM json
+```
+
+And then insert
+```postgresql
+DROP TABLE book;
+
+CREATE TABLE book (
+    id INTEGER,
+    name TEXT,
+    content JSONB
+);
+
+INSERT INTO book (id, name, content)
+SELECT 1, 'King James Bible', j.content
+FROM json j;
+
+SELECT * FROM book;
+```
+
+### Peek
+
+All rows fits in the same block.
+```postgresql
+SELECT     
+    (ctid::text::point)[0] block_id,
+    (ctid::text::point)[1] item_id    
+FROM book
+```
+
+Data is stored in TOAST
+```postgresql
+SELECT 
+    attname           "column", 
+    atttypid::regtype "type",
+    CASE attstorage
+        WHEN 'p' THEN 'nothing'
+        WHEN 'm' THEN 'compress in place, then toast if needed'
+        WHEN 'e' THEN 'toast uncompressed'
+        WHEN 'x' THEN 'toast compressed'
+    END AS operation
+FROM pg_attribute
+WHERE attrelid = 'book'::regclass AND attnum > 0;
+```
+
+Get toast table name 
+```postgresql
+SELECT toast.relname
+FROM pg_class heap 
+    INNER JOIN pg_class toast ON heap.reltoastrelid = toast.oid
+WHERE 1=1
+  AND heap.relkind = 'r'
+  AND heap.relname = 'book'
+  AND toast.relkind = 't'
+;  
+```
+
+Size
+```postgresql
+SELECT 
+    pg_size_pretty(pg_table_size('book') - pg_table_size('pg_toast.pg_toast_16803'))  heap_size,
+    pg_size_pretty(pg_table_size('pg_toast.pg_toast_16803'))                          toast_size,
+    pg_size_pretty(pg_table_size('book'))                                             total_size
+```
+
+| heap\_size | toast\_size | total\_size |
+|:-----------|:------------|:------------|
+| 72 kB      | 4088 kB     | 4160 kB     |
+
+
+The data has not been compressed very much, 4.4 Mb to 4 Mb.
+
 ## Compression
 
 ```postgresql

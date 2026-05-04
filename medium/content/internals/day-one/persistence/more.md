@@ -250,7 +250,7 @@ WHERE 1=1
 ```
 pg_toast_16474
 
-Access
+Access it using `pg_toast` namespace.
 ```postgresql
 SELECT * FROM pg_toast.pg_toast_16474
 ```

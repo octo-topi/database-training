@@ -4,7 +4,7 @@
 
 Create a table with the following columns: 
 - one integer;
-- one fixed-size text `CHARACTER($LENGTH)`.
+- one fixed-size text `name CHARACTER($LENGTH)`.
 
 Insert data and find:
 - the row length;
@@ -18,9 +18,19 @@ Insert data and find:
 - the row length;
 - how many rows per block.
 
+## JSON type
+
+Create a table, named `books`, which contains : 
+- an identifier (number);
+- a JSON content (JSONB).
+
+Insert some content, e.g. [King's Jame Bible](https://github.com/farskipper/kjv/blob/master/json/verses-1769.json).
+How much space does it take on disk ?
+
+
 ## Table content
 
-What is the size of `flights` table ?
+In `practice` database, what is the size of `flights` table ?
 
 How many blocks ? How many rows ?
 

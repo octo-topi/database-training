@@ -440,8 +440,8 @@ The overhead is 89%.
 If we want to know the size without looking into the datafile, we can call several functions.
 ```postgresql
 SELECT 
-    pg_table_size('mytable')                            table_size_bytes,
     pg_size_pretty(pg_table_size('mytable'))            table_size
+    pg_table_size('mytable')                            table_size_bytes,
 ```
 346 MB
 
