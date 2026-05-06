@@ -42,3 +42,11 @@ execute-query:
 
 terminate-backends:
     psql --dbname "$CONNECTION_STRING" --command="SELECT pg_cancel_backend(pid) FROM pg_stat_activity WHERE state = 'active' and pid <> pg_backend_pid()";
+
+# setup
+
+show-ide-connection:
+    @echo "Postgresql server listening on host <localhost> on port <$POSTGRESQL_EXPOSED_PORT>"
+    @echo "The open database name is <$POSTGRESQL_DATABASE_NAME>"
+    @echo "Log in as user <$POSTGRESQL_USER_NAME>, password <$POSTGRESQL_USER_PASSWORD> "
+    @echo "JDBC URL is <$CONNECTION_STRING_JDBC>"

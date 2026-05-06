@@ -1,12 +1,3 @@
-# Start (docker)
-# docker compose up --force-recreate --renew-anon-volumes --detach --wait postgresql
-#
-# Setup (IDE)
-# jdbc:postgresql://localhost:$POSTGRESQL_EXPOSED_PORT/$POSTGRESQL_DATABASE_NAME
-#
-# Connect (client)
-# psql --dbname "host=localhost port=$POSTGRESQL_EXPOSED_PORT dbname=$POSTGRESQL_DATABASE_NAME user=$POSTGRESQL_USER_NAME password=$POSTGRESQL_USER_PASSWORD"
-
 # Load container configuration from environment variables
 # Limit resources (CPU/RAM)
 # Load PostgreSQL configuration from postgresql.conf file

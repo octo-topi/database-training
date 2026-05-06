@@ -224,6 +224,8 @@ WHERE 1=1
   AND heap.relname = 'book'
   AND toast.relkind = 't'
 ;  
+
+select * from pg_settings
 ```
 
 Size

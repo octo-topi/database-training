@@ -156,7 +156,7 @@ Let's see:
 
 The figures match.
 
-To read execution plan, see [the dedicated section](../executing/explain.md).
+To read execution plan, see [the dedicated section](../explain/explain.md).
 
 #### Does it scale ?
 
