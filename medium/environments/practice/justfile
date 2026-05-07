@@ -46,3 +46,10 @@ generate-activity:
 
 running-queries:
     psql --dbname "$CONNECTION_STRING_FLIGHT" --file=./queries/running-queries.sql
+
+
+show-ide-connection:
+    @echo "Postgresql server listening on host <localhost> on port <$POSTGRESQL_EXPOSED_PORT>"
+    @echo "The open database name is <$POSTGRESQL_FLIGHT_DATABASE_NAME>"
+    @echo "Log in as user <$POSTGRESQL_USER_NAME>, password <$POSTGRESQL_USER_PASSWORD> "
+    @echo "JDBC URL is <$CONNECTION_STRING_JDBC>"

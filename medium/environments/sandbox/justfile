@@ -45,6 +45,9 @@ terminate-backends:
 
 # setup
 
+fix-permissions-linux:
+    sudo chown microsoft-identity-broker ./configuration/postgresql.conf
+
 show-ide-connection:
     @echo "Postgresql server listening on host <localhost> on port <$POSTGRESQL_EXPOSED_PORT>"
     @echo "The open database name is <$POSTGRESQL_DATABASE_NAME>"

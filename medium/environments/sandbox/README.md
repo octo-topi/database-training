@@ -44,6 +44,34 @@ Start the instance.
 just start-instance
 ```
 
+The command should exit successfully.
+```shell
+docker compose up --detach --wait postgresql
+[+] up 2/2
+ ✔ Network sandbox_default Created
+ ✔ Container postgresql    Healthy  
+```
+
+If it doesn't, check the logs.
+```shell
+just logs
+```
+
+If you get this error message and are on Linux.
+```shell
+PostgreSQL Database directory appears to contain a database; Skipping initialization
+
+2026-05-07 10:12:29.469 GMT [1] LOG:  could not open configuration file "/etc/postgresql/postgresql.conf": Permission denied
+2026-05-07 10:12:29.469 GMT [1] FATAL:  configuration file "/etc/postgresql/postgresql.conf" contains errors
+```
+
+Then try to fix the problem by changing ownership of `postgresql.conf` file.
+```shell
+just fix-permissions-linux
+```
+
+## Connect CLI
+
 Check you can connect using your `psql` client.
 ```shell
 just console

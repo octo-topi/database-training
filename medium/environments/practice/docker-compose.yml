@@ -1,3 +1,7 @@
+# Load container configuration from environment variables
+# Limit resources (CPU/RAM)
+# Load PostgreSQL configuration from postgresql.conf file
+# Persist PostgreSQL data in named volume
 services:
   postgresql:
     container_name: ${CONTAINER_NAME}
