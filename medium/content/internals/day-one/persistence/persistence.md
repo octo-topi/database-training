@@ -234,7 +234,7 @@ These pointers can be seen as block-scoped indexes.
 
 Pointer are stored at block's start, rows are stored at block's end.
 
-![Block layout.png](block-layout.png)
+![Block layout.png](assets/block-layout.png)
 
 Let's peek into them using an extension.
 
@@ -880,6 +880,6 @@ As for now, just remember this extract of [PostgreSQL docs](https://www.postgres
 > Because an item identifier is never moved until it is freed, its index can be used on a long-term basis to reference an item.
 > Every pointer to an item created by PostgreSQL consists of a page number and the index of an item identifier.
 
-![Storage overview](storage-overview.png)
+![Storage overview](assets/storage-overview.png)
 
 
