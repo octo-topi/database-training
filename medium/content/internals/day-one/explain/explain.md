@@ -1,6 +1,8 @@
 # Explain
 
-## Input
+## Scope
+
+### Plan
 
 What does planning take into account ?
 - query predicate
@@ -9,7 +11,9 @@ What does planning take into account ?
 - data statistics (row expected)
 - cache, only for index (hit, dirtied, read)
 
-What does plan execution tracks donw ?
+### Execute
+
+What does plan execution tracks down ?
 - data statistics (row actual, Rows Removed by Filter)
 - cache (hit, dirtied, read)
 - wal (wal)
@@ -84,7 +88,7 @@ This time, we got the right estimate
 Seq Scan on mytable  (cost=0.00..1.01 rows=1 width=4)
 ```
 
-We can get actual rows and timings by executing query with `ANALYZE` option 
+We can get actual rows and timings by executing query with `ANALYZE` option.
 ```postgresql
 EXPLAIN (ANALYZE)
 SELECT id 
@@ -96,7 +100,7 @@ We get
 Seq Scan on mytable  (cost=0.00..1.01 rows=1 width=4) (actual time=0.011..0.013 rows=1 loops=1)
 ```
 
-Let's decode it
+Let's decode it;
 ```text
 $operation on $object  ($expected)                      (actual time=$first_row..$last_row rows=$row_count loops=$loops)
 Seq Scan on mytable    (cost=0.00..1.01 rows=1 width=4) (actual time=0.011..0.013          rows=1          loops=1)

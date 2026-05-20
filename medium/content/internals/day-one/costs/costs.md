@@ -110,6 +110,7 @@ Let's compute it ourselves.
 WITH read_block AS (
     SELECT 
         current_setting('seq_page_cost') one_block,
+        c.relpages how_many_block,
         c.relpages * current_setting('seq_page_cost')::DECIMAL whole_file
     FROM pg_class c       
     WHERE c.relname = 'mytable'
@@ -117,15 +118,16 @@ WITH read_block AS (
    decode_block AS (
     SELECT 
         current_setting('cpu_tuple_cost') one_row,
+        c.reltuples how_many_tuples,
         c.reltuples * current_setting('cpu_tuple_cost')::DECIMAL whole_table
     FROM pg_class c
     WHERE c.relname = 'mytable'       
 ) 
 SELECT 
     'read block=>',
-    r.one_block, r.whole_file,
+    r.one_block, r.how_many_block, r.whole_file,
     'decode block=>',
-    f.one_row, f.whole_table,
+    f.one_row, f.how_many_tuples, f.whole_table,
     'whole=>',
     r.whole_file + f.whole_table cost
 FROM read_block r, decode_block f 
@@ -249,7 +251,7 @@ FROM generate_series(1, 1_000_000) AS n;
 
 ANALYZE VERBOSE mytable;
 
-SELECT * FROM mytable;
+SELECT id, count(1) FROM mytable GROUP By id;
 ```
 
 What is the cost for scan ?
@@ -268,6 +270,11 @@ SELECT * FROM mytable
 WHERE id = 2
 ```
 33 850, 995 000 rows expected
+
+
+```postgresql
+SHOW cpu_operator_cost
+```
 
 Let's compute it ourselves.
 ```postgresql
@@ -335,7 +342,7 @@ It scales, its complexity is O(n).
 #### How does the expected rows come ?
 
 To estimate how many rows we will get, we need data statistics.
-There is a whole [section](../filtering/filtering.md) on this.
+There is a whole [section](../statistics$/filtering.md) on this.
 
 
 ### Data transform - On a row

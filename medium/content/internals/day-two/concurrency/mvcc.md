@@ -26,6 +26,9 @@ FROM generate_series(1, 10_000_000) AS n;
 ```
 
 Check size on disk
+```postgresql
+SELECT pg_size_pretty(pg_relation_size('mytable'));
+```
 
 Find its physical location
 ```postgresql
@@ -297,7 +300,7 @@ SELECT t.ctid, t.xmin, t.xmax FROM mytable t;
 
 | ctid    | xmin | xmax |
 |:--------|:-----|:-----|
-| \(0,2\) | 860  | 0 a  |
+| \(0,2\) | 860  | 0    |
 
 
 To see the old version, we'll use `pageinspect` extension.
@@ -429,7 +432,15 @@ WHERE t.relname = 'mytable'
 | 0            | 200050       | false    |
 
 
--- cTIODO: add exemple to se t and get settinsg on tabkle
+TODO: add query to get setting
+
+You can change these parameter for your table
+```postgresql
+ALTER TABLE mytable
+SET (autovacuum_vacuum_threshold = 20);
+
+select * from pg_stat_statements;
+```
 
 ### Start on insert
 
@@ -460,3 +471,6 @@ WHERE t.relname = 'mytable'
 
 TODO: Add TOAST link - as soon as the field is not updated, it can stay the same in the TOAST.
 The idea is that such data are write once, read many, never changed.
+
+
+TODO: add link to limit amount of work

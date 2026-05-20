@@ -57,6 +57,63 @@ If you can afford to lose your data, and need performance, consider these two op
 When you create an `UNLOGGED` [table](https://www.postgresql.org/docs/current/sql-createtable.html#SQL-CREATETABLE-UNLOGGED), no WAL is written on data change. 
 If a crash happens, PostgreSQL cannot guarantee data integrity, so it truncate the table on restart. If no crash happens, it behaves like a regular table.
 
+
+```postgresql
+DROP TABLE IF EXISTS mytable;
+
+CREATE TABLE mytable (
+    id  integer
+) WITH (AUTOVACUUM_ENABLED = FALSE);
+
+EXPLAIN (ANALYZE, WAL)
+INSERT INTO mytable (id)
+SELECT n
+FROM generate_series(1, 100_000) AS n;
+```
+
+You get WAL figures
+```text
+Insert on mytable  (cost=0.00..1000.00 rows=0 width=0) (actual time=41.631..41.632 rows=0.00 loops=1)
+"  Buffers: shared hit=100882 dirtied=443 written=446, temp read=171 written=171"
+"  I/O Timings: shared write=1.536, temp read=0.291 write=0.638"
+  WAL: records=100000 bytes=5900000 buffers full=305
+  ->  Function Scan on generate_series n  (cost=0.00..1000.00 rows=100000 width=4) (actual time=5.733..10.061 rows=100000.00 loops=1)
+        Buffers: temp read=171 written=171
+        I/O Timings: temp read=0.291 write=0.638
+Planning Time: 0.048 ms
+Execution Time: 41.965 ms
+```
+
+`WAL: records=100000 bytes=5900000 buffers full=305`
+5 900 000 bytes
+305 buffers
+
+```postgresql
+DROP TABLE IF EXISTS mytable;
+
+CREATE UNLOGGED TABLE mytable (
+    id  integer
+) WITH (AUTOVACUUM_ENABLED = FALSE);
+
+EXPLAIN (ANALYZE, WAL)
+INSERT INTO mytable (id)
+SELECT n
+FROM generate_series(1, 100_000) AS n;
+```
+
+You don't get any WAL
+```text
+Insert on mytable  (cost=0.00..1000.00 rows=0 width=0) (actual time=34.808..34.809 rows=0.00 loops=1)
+"  Buffers: shared hit=100882 dirtied=443 written=446, temp read=171 written=171"
+"  I/O Timings: shared write=2.498, temp read=0.381 write=0.746"
+  ->  Function Scan on generate_series n  (cost=0.00..1000.00 rows=100000 width=4) (actual time=5.971..11.780 rows=100000.00 loops=1)
+        Buffers: temp read=171 written=171
+        I/O Timings: temp read=0.381 write=0.746
+Planning Time: 0.045 ms
+Execution Time: 35.199 ms
+
+```
+
 When you create an `TEMPORARY` [table](https://www.postgresql.org/docs/current/sql-createtable.html#SQL-CREATETABLE-TEMPORARY), no WAL is written on data change and the table in truncated where session ends. As data is visible only to the client for its current transaction, no statistics are collected nor vacuum performed, this is definitely not a regular table. 
 
 ## What you shouldn't do at all

@@ -2,7 +2,7 @@ setup:
     sudo chown microsoft-identity-broker postgresql.conf
 
 create-dataset:
-    curl --output dump.zip https://edu.postgrespro.com/demo-big-en.zip
+    curl --insecure --output dump.zip https://edu.postgrespro.com/demo-big-en.zip
     unzip dump.zip && rm dump.zip && mv demo-big-en-20170815.sql dump.sql
     psql --dbname "$CONNECTION_STRING" --file dump.sql
     psql --dbname "$CONNECTION_STRING" --command="DROP DATABASE IF EXISTS flight;"

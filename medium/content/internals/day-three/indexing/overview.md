@@ -27,7 +27,7 @@ How can write be so fast on heap ?
 - a block contains free space for insert (no slow OS system call) and update (no fragmentation)
 
 The b-tree is sorted:
-- and sort is expensive if it should be performed after read ; with index, this could be avoided;
+- and sort is expensive if it should be performed after read (in work_mem); with index, this could be avoided;
 - but this sort is done eagerly, before the read happens, on index entry creation ; read may not happen at all;
 - to preserve this order, further operations may happen : e.g. to keep the tree balanced.
 
@@ -39,5 +39,3 @@ Writing in heap involve index maintenance:
    - if not, try to free some space (pointers to dead tuples, by inspecting `lp_dead` bit on pointer or fetching the heap)
    - if still not, do a node split with all existing entries
    - insert the new pointer
-
-##

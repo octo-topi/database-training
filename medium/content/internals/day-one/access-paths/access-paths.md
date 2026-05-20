@@ -6,7 +6,44 @@ Sequential scan complexity is O(n).
 
 How can we keep execution time constant :
 - depending on only of the size of the result set;
-- independently of the underlying data size ?
+- independently of the underlying data size
+
+```postgresql
+INSERT INTO mytable (id)
+SELECT n
+FROM generate_series(1, 10_000_000) AS n;
+```
+
+
+```postgresql
+EXPLAIN ANALYZE
+SELECT COUNT(*)
+FROM mytable
+```
+
+Access path is `Seq Scan` = sequential scan
+Block = buffers = 
+```text
+Aggregate  (cost=370577.00..370577.01 rows=1 width=8) (actual time=1225.026..1225.027 rows=1.00 loops=1)
+  Buffers: shared hit=15815 read=72681 written=60
+  I/O Timings: shared read=583.842 write=0.317
+  ->  Seq Scan on mytable  (cost=0.00..314160.80 rows=22566480 width=0) (actual time=459.884..948.973 rows=10000000.00 loops=1)
+        Buffers: shared hit=15815 read=72681 written=60
+        I/O Timings: shared read=583.842 write=0.317
+Planning:
+  Buffers: shared hit=1 read=2 written=2
+  I/O Timings: shared read=0.218 write=0.021
+Planning Time: 0.316 ms
+Execution Time: 1225.061 ms
+```
+
+We read 15815 + 72681 blocks on fs, which are the total block of the table.
+TODO : add query to get block suml on tabke
+
+```text
+Seq Scan on mytable  (cost=0.00..314160.80 rows=22566480 width=0) (actual time=459.884..948.973 rows=10000000.00 loops=1)
+        Buffers: shared hit=15815 read=72681 written=60
+```
 
 ## Read data more quickly
 
@@ -250,6 +287,8 @@ DROP TABLE IF EXISTS mytable_less_than_million;
 DROP TABLE IF EXISTS mytable_more_than_million;
 DROP TABLE IF EXISTS mytable;
 ```
+
+TODO: add offline partioning
 
 ### Indexes
 

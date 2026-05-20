@@ -89,10 +89,27 @@ INSERT INTO mytable (id)
 SELECT n
 FROM generate_series(1, 100_000) AS n;
 
+update mytable set id=0 where id <21000;
+
 ANALYSE mytable;
 
+EXPLAIN ANALYZE 
+SELECT * FROM mytable;
+
 EXPLAIN ANALYSE 
-SELECT * FROm mytable;
+SELECT * FROM mytable;
+```
+
+TODO: add cache
+```text
+Seq Scan on mytable  (cost=0.00..1443.00 rows=100000 width=4) (actual time=0.026..7.305 rows=100000.00 loops=1)
+  Buffers: shared hit=443
+```
+
+Restart
+```text
+Seq Scan on mytable  (cost=0.00..1443.00 rows=100000 width=4) (actual time=0.026..7.305 rows=100000.00 loops=1)
+  Buffers: shared read=443
 ```
 
 Table size is 3 Mb
@@ -155,6 +172,12 @@ SELECT *
 FROM mytable
 WHERE 1=1
   AND ctid = '(0,1)'
+```
+
+```text
+Tid Scan on mytable  (cost=0.00..1.11 rows=1 width=4) (actual time=0.048..0.050 rows=1.00 loops=1)
+"  TID Cond: (ctid = '(0,1)'::tid)"
+  Buffers: shared read=1
 ```
 
 Q: How many blocks will you get ?
@@ -269,13 +292,57 @@ Let's empty the cache
 just restart-instance
 ```
 
+```postgresql
+ANALYZE mytable;
+SELECT relpages block_count
+FROM pg_class WHERE relname = 'mytable';
+```
+44 248 blocs
+
 And query 
 ```postgresql
+EXPLAIN ANALYZE
 SELECT *
 FROM mytable
 WHERE 1=1
   AND id = 1
 ```
+
+```text
+Seq Scan on mytable  (cost=0.00..169247.71 rows=1 width=4) (actual time=0.045..534.667 rows=1.00 loops=1)
+  Filter: (id = 1)
+  Rows Removed by Filter: 9999999
+  Buffers: shared read=44248 dirtied=14248 written=6494
+  I/O Timings: shared read=169.877 write=15.123
+Planning:
+  Buffers: shared hit=8 read=1 dirtied=1
+  I/O Timings: shared read=0.033
+Planning Time: 0.226 ms
+Execution Time: 534.692 ms
+```
+All blocks has been read
+shared read=44 248 
+
+And query 
+```postgresql
+EXPLAIN ANALYZE
+SELECT *
+FROM mytable
+WHERE 1=1
+  AND id = 1
+```
+
+```text
+Seq Scan on mytable  (cost=0.00..169247.71 rows=1 width=4) (actual time=0.110..412.523 rows=1.00 loops=1)
+  Filter: (id = 1)
+  Rows Removed by Filter: 9999999
+  Buffers: shared hit=15583 read=28665 written=28
+  I/O Timings: shared read=54.294 write=0.149
+Planning Time: 0.066 ms
+Execution Time: 412.544 ms
+```
+
+
 
 And check 
 ```postgresql
@@ -469,7 +536,7 @@ FROM generate_series(1, 10_000_000) AS n;
 ## Modifying data - dirty blocks
 
 What happens if we modify a row, that is, we create a new version ?
-
+q
 ```postgresql
 SELECT ctid FROM mytable 
 WHERE id=1
@@ -477,11 +544,30 @@ WHERE id=1
 (0,1)
 This is block 0
 
+
+```postgresql
+SELECT * FROM mytable WHERE ctid = '(0,1)'
+```
+
+
+```postgresql
+SELECT
+    b.*
+FROM pg_class c
+         INNER JOIN pg_buffercache b ON b.relfilenode = c.relfilenode
+         INNER JOIN pg_database d ON (b.reldatabase = d.oid AND d.datname = current_database())
+WHERE 1=1
+      AND c.relname NOT LIKE 'pg_%'
+      AND c.relname = 'mytable'
+```
+
+
 We update and get the block
 ```postgresql
 UPDATE mytable 
 SET id=-1
 WHERE id=1
+AND ctid = '(0,1)'
 RETURNING ctid
 ```
 (88495,131)
@@ -538,16 +624,17 @@ It disappears, written to disk.
 ```postgresql
 SELECT
     c.relname,
-    COUNT(*) dirty_blocks,
+    b.isdirty,
+    COUNT(*) blocks,
     pg_size_pretty(COUNT(*) * 8 * 1024) dirty_size
 FROM pg_class c
          INNER JOIN pg_buffercache b ON b.relfilenode = c.relfilenode
          INNER JOIN pg_database d ON (b.reldatabase = d.oid AND d.datname = current_database())
 WHERE 1=1
-    --AND c.relname = 'mytable'    
-    AND b.isdirty IS TRUE
+    AND c.relname = 'mytable'    
+    --AND b.isdirty IS TRUE
 GROUP BY 
-    c.relname
+    c.relname, B.isdirty
 ```
 
 #### Automatically

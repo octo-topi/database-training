@@ -413,3 +413,19 @@ FROM pg_statio_user_tables s
 WHERE s.relname = 'flights'
 ORDER BY pg_relation_size(relid) DESC;
 ```
+
+## TOAST
+
+
+```postgresql
+SELECT 
+  t.relname                                                 main_table_name,
+  pg_size_pretty(pg_table_size(t.relname::regclass)-pg_table_size(t.reltoastrelid::regclass)) main_table_size,
+  t.reltoastrelid                                           toast_table_name,
+  pg_size_pretty(pg_table_size(t.reltoastrelid::regclass))  toast_table_size
+FROM pg_class t 
+WHERE 1=1
+  AND t.reltoastrelid <> 0
+  AND SUBSTR(t.relname, 1, 3) <> 'pg_'
+  AND SUBSTR(t.relname, 1, 4) <> 'sql_'
+```

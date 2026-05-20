@@ -57,4 +57,10 @@ ALTER TABLE mytable
 SET (autovacuum_analyze_scale_factor = 0.05)
 ```
 
+```postgresql
+SELECT pg_stat_statements_reset();
+
+SELECT * FROM pg_stat_statements;
+```
+
 [Reference](https://www.postgresql.org/docs/current/routine-vacuuming.html)

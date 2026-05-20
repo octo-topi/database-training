@@ -43,7 +43,7 @@ LIMIT 10;
 
 ## Evict from cache
 
-Evict from cache
+Evict from cache : run several times until you get no output
 ```postgresql
 SELECT
     pg_buffercache_evict(b.bufferid)

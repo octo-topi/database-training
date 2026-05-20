@@ -96,7 +96,8 @@ How can PostgreSQL do that ? It will compute statistics on the table from time t
 
 Let's query  `pg_statistic` table.
 ```postgresql
-SELECT * FROM pg_statistic s
+SELECT * 
+FROM pg_statistic s
 WHERE s.starelid = 'mytable'::regclass
 ```
 [Reference](https://www.postgresql.org/docs/current/catalog-pg-statistic.html)
@@ -145,7 +146,9 @@ Look like there is no statistics if the table has no live tuples.
 Let's add some.
 ```postgresql
 INSERT INTO mytable (id) VALUES (-1);
+
 ANALYZE VERBOSE mytable;
+
 SELECT * FROM pg_statistic s
 WHERE s.starelid = 'mytable'::regclass;
 ```
@@ -194,6 +197,7 @@ If we check [the docs](https://www.postgresql.org/docs/current/view-pg-stats.htm
 
 So if we run this query, we know we will get all table's rows.
 ```postgresql
+EXPLAIN
 SELECT id 
 FROM mytable
 WHERE id=1
@@ -207,6 +211,7 @@ FROM pg_class c
     JOIN pg_stats s ON s.tablename = c.relname
 WHERE 1=1
     AND c.relname = 'mytable'
+    AND s.attname = 'id'
 ```
 10 000 047
 
@@ -223,7 +228,9 @@ WHERE id=1
 The ratio of rows that are kept after the filter is called the `selectivity`.
 ```postgresql
 SELECT 
-    ((SELECT COUNT(*) FROM mytable WHERE id=1)::DECIMAL / (SELECT COUNT(*) FROM mytable)::DECIMAL) selectivity
+    ((SELECT COUNT(*) FROM mytable WHERE id=1)::DECIMAL 
+   / (SELECT COUNT(*) FROM mytable)::DECIMAL) 
+    selectivity
 ```
 
 The selectivity is all about the data: here, teh frequency of the selected value, 1, is the selectivity. 
@@ -253,7 +260,9 @@ FROM generate_series(1, 50/100::DECIMAL * 1_000_000) AS n;
 ANALYZE VERBOSE mytable;
 
 SELECT COUNT(*) FROM mytable;
-SELECT * FROM mytable;
+
+SELECT * FROM mytable
+ORDER BY id DESC;
 ```
 
 Let's see
@@ -283,10 +292,18 @@ NULL (which is not a value) makes for `50%` of the rows.
 
 If we run this query, we know we will 40% of table rows.
 ```postgresql
-SELECT id 
+EXPLAIN
+SELECT id
 FROM mytable
 WHERE id=2
 ```
+
+```text
+Seq Scan on mytable  (cost=0.00..16431.00 rows=400700 width=4)
+  Filter: (id = 2)
+```
+
+400 700 = 40% * 1 000 000
 
 That is:
 ```postgresql
@@ -296,15 +313,24 @@ FROM pg_class c
     JOIN pg_stats s ON s.tablename = c.relname
 WHERE 1=1
     AND c.relname = 'mytable'
+    AND s.attname = 'id'
 ```
 401 566
 
 If we run this query, we will have about 50% of table rows.
 ```postgresql
+EXPLAIN
 SELECT id 
 FROM mytable
 WHERE id IS NULL
 ```
+
+```text
+Seq Scan on mytable  (cost=0.00..13931.00 rows=496767 width=4)
+  Filter: (id IS NULL)
+```
+
+496767 = 50 % * 1 000 000
 
 That is:
 ```postgresql
@@ -341,6 +367,7 @@ FROM generate_series(1, 1_000_000) AS n;
 ANALYZE VERBOSE mytable;
 
 SELECT COUNT(*) FROM mytable;
+
 SELECT * FROM mytable;
 ```
 
@@ -375,7 +402,7 @@ SELECT
 FROM pg_stats s
 WHERE 1=1
     AND s.tablename = 'mytable'
-    AND s.attname = 'code'
+    AND s.attname = 'id'
 ```
 
 | size\_bytes | distinct\_values | histogram\_bounds                                     | bucket\_count |
@@ -394,9 +421,10 @@ SHOW default_statistics_target
 
 So what about our query ?
 ```postgresql
+EXPLAIN
 SELECT id 
 FROM mytable
-WHERE id = 1
+WHERE id = 50
 ```
 
 Each bucket contains around 10 000 rows
@@ -413,9 +441,9 @@ WHERE 1=1
 The first bucket, contains our value `50`.
 It also covers more value, around 10 000 values
 ```postgresql
-SELECT 10416 - 46 bucket1_size
+SELECT 9228 - 16 first_bucket_size
 ```
-10370 
+9212 
 
 If we consider equiprobability (there are as many rows for 50 than for 10416)
 The row count per value is  
@@ -423,7 +451,7 @@ The row count per value is
 WITH bucket AS (
     SELECT 
         TRUNC(c.reltuples /  cardinality(s.histogram_bounds)) row_per_bucket,
-        (10416 - 46) first_bucket_size
+        (9228 - 16) first_bucket_size
     FROM  pg_class c
         JOIN pg_stats s ON s.tablename = c.relname
     WHERE c.relname = 'mytable'
@@ -433,8 +461,6 @@ SELECT
 FROM bucket b
 ```
 1 row
-
-
 
 
 ## Several columns
@@ -486,9 +512,23 @@ We can see:
 - `id` has 2 values, 1 and 2, 50% each
 - `valid` has 2 values, false 75% and true on 25%
 
+
+```postgresql
+EXPLAIN ANALYZE 
+SELECT *
+FROM mytable
+WHERE 1=1
+    AND id = 2
+    AND valid IS TRUE
+```
+
+
 But we can't see that all `2` have false, and that 1 have 50/50.  
 ```postgresql
-SELECT id, valid, count(1) FROM mytable GROUP BY id, valid
+SELECT 
+    id, valid, count(1) 
+FROM mytable 
+GROUP BY id, valid
 order by id;
 ```
 
@@ -503,6 +543,17 @@ To prevent this, we can create a custom statistic.
 ```postgresql
 CREATE STATISTICS id_and_validity ON id, valid FROM mytable;
 ANALYZE VERBOSE mytable;
+```
+
+
+TODI: TIX THIS YOu LOOK RIDICULOUS CREATTINg USELESS STATS
+```postgresql
+EXPLAIN ANALYZE 
+SELECT *
+FROM mytable
+WHERE 1=1
+    AND id = 2
+    AND valid IS TRUE
 ```
 
 Let's see
@@ -578,11 +629,20 @@ SELECT id, name FROM mytable LIMIT 3;
 
 Suppose we want to query always the name starting with a vowel 
 ```postgresql
-SELECT id, name 
+EXPLAIN ANALYZE
+SELECT 
+    id, name, SUBSTRING(name,1,1) premiere_lettre
 FROM mytable 
-WHERE SUBSTRING(name,1,1) IN ('A','E','I','O','U','Y') 
-LIMIT 5; 
+WHERE 1=1
+    AND SUBSTRING(name,1,1) IN ('A','E','I','O','U','Y') 
+--LIMIT 5; 
 ```
+
+```text
+Seq Scan on mytable  (cost=0.00..25481.00 rows=30000 width=46) (actual time=0.026..141.152 rows=200500.00 loops=1)
+```
+Expected = 30 000
+Actual =  200 500
 
 | id | name      |
 |:---|:----------|
@@ -596,7 +656,7 @@ LIMIT 5;
 We will repeatedly filter on first character.
 How can PostgreSQL know how many rows will be returned ?
 
-
+TODO: DROP virtual and materialised, ; keep uctsom stats
 ### Virtual column
 
 We can create a virtual column. 
@@ -630,6 +690,7 @@ There is no statistics, we need to materialize the column.
 
 ```postgresql
 DROP TABLE mytable;
+
 CREATE TABLE mytable (
     id    INTEGER,
     name  TEXT,
@@ -656,7 +717,7 @@ SELECT
 FROM pg_stats s
 WHERE 1=1
     AND s.tablename = 'mytable'
-    AND s.attname = 'first_letter'
+    AND s.attname   = 'first_letter'
 ```
 
 | attname       | distinct\_values | most\_common\_values\_count | most\_common\_values\_frequency          | null\_ratio |
@@ -673,7 +734,9 @@ We can rather create an expression custom statistic.
 
 ```postgresql
 DROP STATISTICS first_letter_is_vowel;
+
 CREATE STATISTICS first_letter_is_vowel ON (SUBSTRING(name, 1, 1) IN ('A','E','I','O','U')::BOOLEAN) FROM mytable;
+
 ANALYZE VERBOSE mytable;
 ```
 
@@ -696,3 +759,33 @@ We see that only 15% rows from the sample starts with a vowel.
 |:-----------------|:----------------------------|:---------------------------------------|:--------------------------------|
 | 2                | {f,t}                       | {0.84006667137146,0.15993332862854004} | 0.8400667                       |
 
+
+```postgresql
+EXPLAIN ANALYZE
+SELECT 
+    id, name, SUBSTRING(name,1,1) premiere_lettre
+FROM mytable 
+WHERE 1=1
+    AND SUBSTRING(name,1,1) IN ('A','E','I','O','U','Y') 
+--LIMIT 5; 
+```
+
+TODl 
+```text
+Seq Scan on mytable  (cost=0.00..25481.00 rows=30000 width=46) (actual time=0.021..145.260 rows=200184.00 loops=1)
+```
+
+
+
+```postgresql
+SELECT
+    s.attname
+    ,s.n_distinct        distinct_values
+    ,s.most_common_vals  most_common_values_count
+    ,s.most_common_freqs most_common_values_frequency
+     ,TRUNC(s.null_frac * 100) || '%'  null_ratio 
+FROM pg_stats s
+WHERE 1=1
+    AND s.tablename = 'mytable'
+   -- AND s.attname   = 'first_letter'
+```

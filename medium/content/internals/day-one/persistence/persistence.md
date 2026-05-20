@@ -48,6 +48,8 @@ Heap is not optimized for :
 
 The only faster method if you only need to write is append-only (hadoop, kafka), but it makes reading much slower.
 
+TODO: Move it to the end of chapter, or in overview
+
 ## How is a table stored ?
 
 Create a table
@@ -204,7 +206,8 @@ These blocks are usually bigger than the blocks used by the operating system, of
 
 To get the block is row is stored into, access a special column `ctid`
 ```postgresql
-SELECT     
+SELECT  
+    ctid,
     (ctid::text::point)[0]::bigint AS block,
     id
 FROM mytable
@@ -296,7 +299,7 @@ And look at them.
 ```postgresql
 SELECT 
     pnt.lp_off row_start,
---    pnt.lp_off - lp_len row_end,
+    --pnt.lp_off - lp_len row_end,
     pnt.lp_len row_length
 FROM heap_page_items(get_raw_page('mytable', 0)) pnt
 ORDER BY pnt.lp ASC
@@ -410,6 +413,8 @@ FROM pg_stat_file(pg_relation_filepath('mytable')) AS data_file
 ```
 346 MB
 
+-- remove this
+
 How much space is used for actual data ?
 What is the storage overhead ? We saw there is much overhead for an empty block.
 Now, what is this overhead for a whole table ?
@@ -440,12 +445,14 @@ The overhead is 89%.
 If we want to know the size without looking into the datafile, we can call several functions.
 ```postgresql
 SELECT 
-    pg_size_pretty(pg_table_size('mytable'))            table_size
-    pg_table_size('mytable')                            table_size_bytes,
+    pg_size_pretty(pg_table_size('mytable'))            table_size,
+    pg_table_size('mytable')                            table_size_bytes
 ```
 346 MB
 
 ### Size on disk (rows)
+
+TODO: add count(*)
 
 How many rows ? Check `pg_stat_user_tables`
 ```postgresql
@@ -515,6 +522,7 @@ You get
 
 Query first 10 rows of table.
 ```postgresql
+EXPLAIN ANALYZE
 SELECT id 
 FROM mytable
 LIMIT 10
@@ -595,12 +603,15 @@ WHERE 1=1
 ;
 ```
 
+## Practice
+
+Let's do [something practical](./practice.md) !
+
 ## Delete rows
 
 ### Space cannot be reused for INSERT
 
 ```postgresql
-
 DROP TABLE IF EXISTS mytable;
 
 CREATE TABLE mytable (
@@ -616,12 +627,12 @@ FROM generate_series(1, 10_000_000) AS n;
 SELECT pg_size_pretty(pg_table_size('mytable'))
 ```
 
-
 Delete all rows
 ```postgresql
 DELETE FROM mytable WHERE true
 ```
 
+Let's check they have been deleted.
 ```postgresql
 SELECT *
 FROM mytable;
@@ -632,6 +643,10 @@ Check size
 SELECT pg_size_pretty(pg_table_size('mytable'))  table_size
 ```
 Still 346 MB
+
+```postgresql
+SELECT pg_relation_filepath('mytable')
+```
 
 Check size on disk: it is still there.
 ```text
@@ -689,6 +704,7 @@ Check message
 ```text
 tuples: 10_000_000 removed, 10_000_000 remain, 0 are dead but not yet removable
 ```
+TODO: check it happened 
 
 Check deleted rows are not here anymore.
 ```postgresql
@@ -748,6 +764,8 @@ And mark them for reuse.
 ```postgresql
 VACUUM VERBOSE mytable;
 ```
+
+ToDO: add trunacte on end table
 
 Check size
 ```postgresql

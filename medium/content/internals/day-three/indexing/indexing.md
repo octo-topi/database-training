@@ -92,6 +92,13 @@ SELECT n
 FROM generate_series(1, 1_000_000) AS n
 ORDER BY random();
 
+SELECT *
+FROM mytable;
+
+ANALYZE VERBOSE mytable;
+
+DROP TABLE mytable_sorted;
+
 CREATE TABLE mytable_sorted AS 
 SELECT id FROM mytable ORDER BY id;
 
@@ -100,10 +107,10 @@ ANALYZE VERBOSE mytable_sorted;
 
 We're back to 1
 ```postgresql
-SELECT correlation
+SELECT tablename, correlation
 FROM database.pg_catalog.pg_stats
 WHERE 1=1
-    AND tablename = 'mytable'
+    AND tablename IN('mytable','mytable_sorted')
     AND attname   = 'id'
 ;    
 ```
